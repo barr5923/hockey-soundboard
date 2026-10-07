@@ -1,5 +1,5 @@
 app = "hockey-soundboard"
-primary_region = "ord"
+primary_region = "lax"
 
 [build]
   dockerfile = "Dockerfile"

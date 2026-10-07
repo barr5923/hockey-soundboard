@@ -86,7 +86,7 @@ fly deploy
 
 `fly deploy` creates the `soundboard_data` volume on the first deploy if it
 does not exist (or create it yourself with
-`fly volumes create soundboard_data --size 1 -r ord -a hockey-soundboard`).
+`fly volumes create soundboard_data --size 1 -r lax -a hockey-soundboard`).
 `SOUNDBOARD_ADMIN_PASSWORD` only sets the password when the `admin` user is
 first created on a fresh database. Add `https://hockey-soundboard.fly.dev` to
 any Spotify/Microsoft redirect URI allow-lists you use.
