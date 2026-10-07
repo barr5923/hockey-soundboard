@@ -1235,6 +1235,23 @@ class Handler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 
+def reset_admin_password(password):
+    if not password:
+        raise SystemExit('SOUNDBOARD_ADMIN_PASSWORD is not set.')
+    init_db()
+    salt = secrets.token_bytes(16)
+    with db_lock, get_db() as conn:
+        conn.execute(
+            'UPDATE users SET salt = ?, hash = ?, is_admin = 1 WHERE username = ?',
+            (salt, hash_password(password, salt), DEFAULT_ADMIN_USERNAME)
+        )
+        conn.execute(
+            'DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = ?)',
+            (DEFAULT_ADMIN_USERNAME,)
+        )
+    print(f"Password for '{DEFAULT_ADMIN_USERNAME}' was reset.")
+
+
 def main():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     init_db()
@@ -1251,5 +1268,7 @@ def main():
 if __name__ == '__main__':
     if sys.argv[1:] == ['--authorize-email']:
         authorize_graph_email()
+    elif sys.argv[1:] == ['--reset-admin-password']:
+        reset_admin_password(os.environ.get('SOUNDBOARD_ADMIN_PASSWORD', ''))
     else:
         main()

@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      reset_admin_password:
+        description: Reset the admin password to the SOUNDBOARD_ADMIN_PASSWORD secret
+        type: boolean
+        default: false
 
 concurrency: fly-deploy
 
@@ -39,3 +44,10 @@ jobs:
           fi
       - name: Deploy (single machine, SQLite on volume)
         run: flyctl deploy --remote-only --ha=false -a "$FLY_APP"
+      - name: Reset admin password
+        if: ${{ inputs.reset_admin_password && env.ADMIN_PW != '' }}
+        run: |
+          MACHINE=$(flyctl machines list -a "$FLY_APP" --json | jq -r '.[0].id')
+          flyctl machines start "$MACHINE" -a "$FLY_APP" || true
+          sleep 5
+          flyctl ssh console -a "$FLY_APP" --machine "$MACHINE" -C "python /app/server.py --reset-admin-password"
