@@ -76,17 +76,28 @@ with a visible error, while local audio remains usable.
 ## Deploying to fly.io
 
 The repo includes a `Dockerfile` and `fly.toml` for the app `hockey-soundboard`.
-Users and boards are stored in SQLite on a persistent volume mounted at `/data`.
+Users and boards are stored in SQLite on a persistent volume mounted at `/data`,
+so the app must run as a single machine (`--ha=false`).
+
+### Via GitHub Actions (no local flyctl needed)
+
+`.github/workflows/fly-deploy.yml` deploys on every push to `main`. It creates
+the `soundboard_data` volume if it is missing. Add these repository secrets in
+GitHub (Settings → Secrets and variables → Actions):
+
+- `FLY_API_TOKEN`: a deploy token from https://fly.io/apps/hockey-soundboard/tokens
+- `SOUNDBOARD_ADMIN_PASSWORD` (optional): initial admin password
+
+### Via flyctl
 
 ```powershell
 fly auth login
 fly secrets set SOUNDBOARD_ADMIN_PASSWORD="choose-a-strong-password" -a hockey-soundboard
-fly deploy
+fly deploy --ha=false
 ```
 
-`fly deploy` creates the `soundboard_data` volume on the first deploy if it
-does not exist (or create it yourself with
-`fly volumes create soundboard_data --size 1 -r lax -a hockey-soundboard`).
+Create the volume before the first deploy:
+`fly volumes create soundboard_data --size 1 -r lax -a hockey-soundboard`.
 `SOUNDBOARD_ADMIN_PASSWORD` only sets the password when the `admin` user is
 first created on a fresh database. Add `https://hockey-soundboard.fly.dev` to
 any Spotify/Microsoft redirect URI allow-lists you use.
