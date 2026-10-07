@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>How to connect music services - Hockey Soundboard</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0e1a2b; color: #e8eef7; margin: 0; line-height: 1.55; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 20px 60px; }
+    h1 { margin-top: 0; }
+    section { background: #16263d; border-radius: 10px; padding: 8px 22px 18px; margin: 22px 0; }
+    a { color: #7cc4ff; }
+    code { background: #0b1422; padding: 1px 6px; border-radius: 4px; }
+    li { margin: 6px 0; }
+    .note { opacity: .85; font-size: .92em; }
+    [data-integration-disabled] { display: none !important; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Connecting music services</h1>
+  <p><a href="index.html">&larr; Back to the soundboard</a></p>
+  <p id="helpIntro" class="note">Shared API credentials are managed by the administrator.</p>
+  <p id="integrationNotice" role="alert" hidden></p>
+  <p id="integrationHelpEmpty">Local MP3 files and built-in sounds remain available.</p>
+
+  <section id="spotify" data-integration="spotify">
+    <h2>Spotify: get a Client ID</h2>
+    <ol>
+      <li>Go to the <a href="https://developer.spotify.com/dashboard" target="_blank" rel="noopener">Spotify Developer Dashboard</a> and sign in with your Spotify account.</li>
+      <li>Click <strong>Create app</strong>.</li>
+      <li>Enter any <strong>App name</strong> and <strong>App description</strong> (for example "Hockey Soundboard").</li>
+      <li>In the app, open Settings and copy the <strong>Redirect URI to register in Spotify</strong> value. Paste it into the <strong>Redirect URIs</strong> box in Spotify and click <strong>Add</strong>. It must match exactly. Spotify requires <code>127.0.0.1</code> rather than <code>localhost</code>, so open the app at the same address shown there.</li>
+      <li>Under <strong>Which API/SDKs are you planning to use?</strong> tick <strong>Web API</strong> and <strong>Web Playback SDK</strong>.</li>
+      <li>Agree to the terms and click <strong>Save</strong>.</li>
+      <li>Open the app's <strong>Settings</strong> in the Developer Dashboard and copy the <strong>Client ID</strong>. You do not need the Client secret.</li>
+      <li>An administrator saves the shared Client ID in <strong>Admin panel &rarr; Music integrations</strong>. Each user then clicks <strong>Connect Spotify</strong> in Settings and approves access to their own account.</li>
+    </ol>
+    <p class="note">Playing full tracks in the browser requires a Spotify Premium account. While your Spotify app is in development mode, add any other Spotify users under <strong>User Management</strong> in the dashboard.</p>
+  </section>
+
+  <section id="youtube" data-integration="youtube">
+    <h2>YouTube: get an API key</h2>
+    <ol>
+      <li>Go to the <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a> and sign in with a Google account.</li>
+      <li>Click the project picker at the top, choose <strong>New project</strong>, name it (for example "Hockey Soundboard") and click <strong>Create</strong>.</li>
+      <li>Open <a href="https://console.cloud.google.com/apis/library/youtube.googleapis.com" target="_blank" rel="noopener">YouTube Data API v3</a> in the API Library and click <strong>Enable</strong>.</li>
+      <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">APIs &amp; Services &rarr; Credentials</a>.</li>
+      <li>Click <strong>Create credentials &rarr; API key</strong>. Copy the key that appears.</li>
+      <li>Recommended: click <strong>Edit API key</strong>, and under <strong>API restrictions</strong> choose <strong>Restrict key</strong> &rarr; <strong>YouTube Data API v3</strong>, then save.</li>
+      <li>An administrator saves the shared key in <strong>Admin panel &rarr; Music integrations</strong>. The server makes playlist requests without exposing the key to users.</li>
+    </ol>
+    <p class="note">The key lets you import public and unlisted playlists. Private playlists cannot be imported with an API key. Keep the key private; anyone with it can use your daily quota.</p>
+  </section>
+  <section id="apple-music" data-integration="appleMusic">
+    <h2>Apple Music: server setup</h2>
+    <p>This first stage imports metadata and links from public playlists and exports CSVs. It does not provide soundboard playback or access to private library playlists.</p>
+    <ol>
+      <li>Join the <a href="https://developer.apple.com/programs/" target="_blank" rel="noopener">Apple Developer Program</a> and create a MusicKit identifier and private key following <a href="https://developer.apple.com/documentation/applemusicapi/generating-developer-tokens" target="_blank" rel="noopener">Apple's developer-token instructions</a>.</li>
+      <li>Keep the downloaded <code>.p8</code> key outside the publicly served soundboard folder. Never paste it into Settings or upload it with app assets.</li>
+      <li>Install the server dependencies from <code>requirements.txt</code>.</li>
+      <li>Set <code>SOUNDBOARD_APPLE_TEAM_ID</code>, <code>SOUNDBOARD_APPLE_KEY_ID</code>, and <code>SOUNDBOARD_APPLE_PRIVATE_KEY_PATH</code> (an absolute path to the key) in the server's environment, then restart the server.</li>
+      <li>Log in as an administrator, enable the integration in Admin, save, and choose <strong>Check server setup</strong>. This checks local signing configuration; importing a playlist verifies Apple API access.</li>
+      <li>Paste a public <code>https://music.apple.com/us/playlist/.../pl...</code> link into Music library or Playlist Conversion. The region in the link is used for catalog access.</li>
+    </ol>
+    <p class="note">No Apple Music subscriber sign-in is required for public catalog metadata. Imported cards say <strong>Open in Apple Music</strong> and are skipped by category playback and autoplay. Private, unavailable, and region-restricted playlists report an error rather than saving a partial import.</p>
+  </section>
+</main>
+<script src="integration-controls.js?v=2"></script>
+</body>
+</html>

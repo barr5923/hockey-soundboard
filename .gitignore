@@ -1,0 +1,17 @@
+# User accounts, sessions, saved boards and admin API keys
+soundboard-users.db
+*.db
+*.db-journal
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local/scratch files
+.env
+*.log
+temp-*.png
+sample-test.mp3

@@ -1,0 +1,17 @@
+{
+  "name": "Hockey Game Soundboard",
+  "short_name": "Soundboard",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0e2d47",
+  "theme_color": "#0e2d47",
+  "icons": [
+    {
+      "src": "seattle-thunderbirds-logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

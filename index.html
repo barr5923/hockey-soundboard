@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hockey Game Soundboard</title>
+    <meta name="theme-color" content="#0e2d47" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="stylesheet" href="styles.css?v=71" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <div class="brand-block">
+          <img class="team-logo" src="seattle-thunderbirds-logo.svg" alt="Seattle ThunderBirds logo" />
+          <div>
+            <p class="eyebrow">Game night audio</p>
+            <h1 id="soundboardTitle" tabindex="0" title="Long press to rename soundboard">Hockey Soundboard</h1>
+          </div>
+        </div>
+
+        <div class="top-controls">
+          <button id="stopPlayback" class="top-button stop-button" type="button" aria-label="Stop music playback">Stop</button>
+          <button id="pauseToggle" class="top-button accent" type="button">Pause</button>
+          <button id="goalHorn" class="top-button danger" type="button">Horn</button>
+          <span class="score-wrap">
+            <button id="scoreButton" class="top-button score-button" type="button">Score</button>
+            <button id="scoreTeamsButton" class="score-teams-button" type="button" aria-label="Score announcement teams" title="Score announcement teams">⚙</button>
+          </span>
+        </div>
+      </header>
+
+      <div id="settingsPanel" class="settings-panel hidden" role="dialog" aria-modal="true" aria-labelledby="settingsHeading">
+        <div class="settings-card">
+          <div class="settings-dialog-header">
+            <h2 id="settingsHeading">Settings</h2>
+            <button id="closeSettings" class="source-button ghost" type="button">Close</button>
+          </div>
+          <div id="accountRow" class="settings-row hidden">
+            <span id="accountName"></span>
+            <button id="logoutButton" class="top-button neutral" type="button">Log out</button>
+          </div>
+          <div id="recoveryEmailRow" class="settings-row block hidden">
+            <label for="recoveryEmail">Recovery email</label>
+            <div class="recovery-email-controls">
+              <input id="recoveryEmail" type="email" autocomplete="email" maxlength="254" required />
+              <button id="saveRecoveryEmail" class="top-button neutral" type="button">Save</button>
+            </div>
+            <p id="recoveryEmailStatus" class="spotify-connection-status" role="status"></p>
+            <button id="verifyRecoveryEmail" class="auth-link" type="button">Send verification email</button>
+          </div>
+          <form id="changePasswordForm" class="settings-row block hidden" autocomplete="off">
+            <label for="newPassword">Change password</label>
+            <input id="newPassword" name="password" type="password" placeholder="New password" autocomplete="new-password" required minlength="8" maxlength="200" />
+            <input id="newPasswordConfirmation" name="passwordConfirmation" type="password" placeholder="Confirm new password" autocomplete="new-password" required minlength="8" maxlength="200" />
+            <button class="top-button neutral" type="submit">Change password</button>
+            <p id="changePasswordStatus" class="spotify-connection-status" role="status"></p>
+          </form>
+          <h3>Brand settings</h3>
+
+          <label class="settings-row">
+            <span>Header logo</span>
+            <input id="headerLogoVisible" type="checkbox" checked />
+          </label>
+
+          <label class="settings-row">
+            <span>Background watermark</span>
+            <input id="watermarkVisible" type="checkbox" checked />
+          </label>
+
+          <label class="settings-row block">
+            <span>Logo file URL</span>
+            <input id="headerLogoUrl" type="text" value="seattle-thunderbirds-logo.svg" placeholder="https://... or local file path" />
+          </label>
+
+          <label class="settings-row block image-picker-row">
+            <span>Choose image from computer</span>
+            <input id="logoFileInput" type="file" accept="image/*" />
+          </label>
+
+          <label class="settings-row block image-picker-row">
+            <span>Custom horn audio</span>
+            <input id="hornFileInput" type="file" accept="audio/*" />
+          </label>
+
+          <label class="settings-row block">
+            <span>Built-in horn sound</span>
+            <select id="builtInHornSelect">
+              <option value="sounds/Default_Horn.wav">Default horn</option>
+              <option value="sounds/Classic_Horn.wav">Classic horn</option>
+              <option id="customHornOption" value="custom">Custom horn audio</option>
+              <option value="sounds/Foghorn.wav">Foghorn</option>
+              <option value="sounds/goalhorn.mp3">Goal Horn</option>
+              <option value="sounds/TBirds_Goal_Horn.mp3">T-Birds Goal Horn</option>
+            </select>
+          </label>
+
+          <label class="settings-row block">
+            <span>Watermark opacity</span>
+            <input id="watermarkOpacity" type="range" min="0" max="30" value="8" />
+          </label>
+
+          <div class="settings-actions">
+            <button id="applySettings" class="source-button" type="button">Apply</button>
+          </div>
+
+          <div id="spotifySection" class="spotify-section" data-integration="spotify">
+            <h3>Spotify connection <a class="help-link" href="how-to.html#spotify" target="_blank" rel="noopener" aria-label="Spotify connection help">?</a></h3>
+            <p class="spotify-connection-status">App credentials are managed by the administrator. Connect your own account below.</p>
+
+            <label class="settings-row block">
+              <span>Redirect URI to register in Spotify</span>
+              <input id="spotifyRedirectUri" type="text" readonly />
+            </label>
+
+            <p id="spotifyConnectionStatus" class="spotify-connection-status" role="status"></p>
+            <div class="settings-actions compact-actions">
+              <button id="spotifyDisconnectButton" class="source-button secondary" type="button">Disconnect</button>
+              <button id="spotifyConnectButton" class="source-button spotify-connect-button" type="button">Connect Spotify</button>
+            </div>
+          </div>
+
+          <div class="spotify-section" data-integration="youtube">
+            <h3>YouTube playlist import <a class="help-link" href="how-to.html#youtube" target="_blank" rel="noopener" title="How to get a YouTube API key" aria-label="How to get a YouTube API key">?</a></h3>
+            <p class="spotify-connection-status">The shared API key is managed by the administrator. Public and unlisted playlist imports use the server.</p>
+          </div>
+          <div class="spotify-section" data-integration="appleMusic">
+            <h3>Apple Music playlist import <a class="help-link" href="how-to.html#apple-music" target="_blank" rel="noopener" aria-label="Apple Music server setup">?</a></h3>
+            <p class="spotify-connection-status">Public playlist metadata and CSV only; soundboard playback is not supported yet. Apple Developer credentials are configured on the server, never in this browser.</p>
+            <p class="spotify-connection-status">Server setup is checked in the Admin panel.</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="status" class="status-bar">
+        Ready for the next shift.
+      </div>
+      <p id="integrationNotice" class="offline-mode-note" role="alert" hidden></p>
+
+      <section class="builtin-picker">
+        <div class="builtin-picker-header">
+          <h3>Built-in sounds</h3>
+          <button id="builtinSoundToggle" class="library-toggle" type="button" aria-label="Expand Built-in sounds" aria-controls="builtinSoundContent" aria-expanded="false" title="Expand Built-in sounds">+</button>
+        </div>
+        <div id="builtinSoundContent" class="hidden">
+          <div id="builtinSoundPicker" class="builtin-sound-picker"></div>
+        </div>
+      </section>
+
+      <section class="library-panel">
+        <div class="library-panel-header">
+          <h3>Music library</h3>
+          <button id="musicLibraryToggle" class="library-toggle" type="button" aria-label="Expand Music library" aria-controls="musicLibraryContent" aria-expanded="false" title="Expand Music library">+</button>
+        </div>
+
+        <div id="musicLibraryContent" class="hidden">
+        <div class="library-group">
+          <h4>Add music</h4>
+
+        <div class="source-row optional-track-details">
+          <label class="source-field">
+            <span>Song name override (optional)</span>
+            <input id="musicNameOverride" type="text" placeholder="Use source title if blank" />
+          </label>
+          <label class="source-field wide">
+            <span>Description override (optional)</span>
+            <input id="musicDescriptionOverride" type="text" placeholder="Use source details if blank" />
+          </label>
+          <label class="source-field">
+            <span>Start time (optional)</span>
+            <input id="musicStartTime" type="text" inputmode="numeric" placeholder="00:00" pattern="[0-9]+:[0-5]?[0-9]" />
+          </label>
+          <label class="source-field">
+            <span>Stop time (optional)</span>
+            <input id="musicStopTime" type="text" inputmode="numeric" placeholder="00:00" pattern="[0-9]+:[0-5]?[0-9]" />
+          </label>
+        </div>
+
+        <label class="music-source-switch">
+          <input id="offlineModeToggle" type="checkbox" />
+          <span>Offline mode</span>
+        </label>
+        <p id="offlineModeNotice" class="offline-mode-note hidden" role="status"></p>
+
+        <label class="music-source-switch" id="localMp3ModeSwitch" data-integrations-any>
+          <input id="useLocalMp3" type="checkbox" />
+          <span>Use local MP3</span>
+        </label>
+
+        <div id="onlineMusicSource" class="online-music-source" data-integrations-any>
+        <div class="spotify-import-row online-import-row">
+          <label class="source-field">
+            <span>Category (optional)</span>
+            <select id="musicCategorySelect">
+              <option value="">Uncategorized</option>
+            </select>
+          </label>
+
+          <label class="source-field wide">
+            <span id="musicLinkLabel">Music link</span>
+            <input id="musicUrl" type="text" placeholder="Paste a song or playlist link" />
+          </label>
+
+          <button id="addMusic" class="source-button" type="button">Add music</button>
+        </div>
+        </div>
+
+        <div id="localMp3Source" class="source-row local-mp3-source hidden">
+          <label class="source-field">
+            <span>Category (optional)</span>
+            <select id="mp3CategorySelect">
+              <option value="">Uncategorized</option>
+            </select>
+          </label>
+          <label class="source-field">
+            <span>Local MP3</span>
+            <input id="localAudio" type="file" accept=".mp3,audio/mpeg" />
+          </label>
+          <button id="addLocalMp3" class="source-button" type="button" disabled>Add MP3 to category</button>
+        </div>
+
+        </div>
+
+        <div class="library-group">
+          <h4>Categories</h4>
+
+        <div class="editor-grid">
+          <label class="editor-field">
+            <span>New category</span>
+            <input id="newCategoryName" type="text" placeholder="Example: Warmup" />
+          </label>
+          <button id="addCategory" class="source-button" type="button">Add category</button>
+        </div>
+        <div class="editor-grid spreadsheet-tools">
+          <label class="editor-field wide">
+            <span>MP3 files referenced in Source (optional)</span>
+            <input id="spreadsheetMp3FilesInput" type="file" accept=".mp3,audio/mpeg" multiple />
+          </label>
+          <label class="editor-field wide">
+            <span>Import Excel or CSV spreadsheet</span>
+            <input id="playlistSpreadsheetInput" type="file" accept=".xlsx,.xls,.csv" />
+          </label>
+          <button id="downloadSpreadsheetExample" class="source-button secondary" type="button">Download example Excel</button>
+        </div>
+        <p class="spreadsheet-note">One song per row. Select referenced MP3 files here so Source filenames can be matched during import.</p>
+        <h4>Share or export a category</h4>
+        <div class="editor-grid spreadsheet-tools">
+          <label class="editor-field wide">
+            <span>Category</span>
+            <select id="shareCategorySelect"></select>
+          </label>
+          <button id="shareCategoryButton" class="source-button" type="button">Share with other users</button>
+          <button id="unshareCategoryButton" class="source-button secondary hidden" type="button">Make private</button>
+          <button id="exportCategoryExcel" class="source-button secondary" type="button">Download Excel</button>
+          <button id="exportCategoryCsv" class="source-button secondary" type="button">Download CSV</button>
+        </div>
+        <p id="shareCategoryNote" class="spreadsheet-note">Categories are private until you share them. Downloads can be imported with the spreadsheet import above.</p>
+        <h4>Shared by other users</h4>
+        <div id="sharedCategoryList" class="shared-category-list"></div>
+        </div>
+        </div>
+      </section>
+
+      <audio id="customAudio" hidden></audio>
+      <div id="youtubeWrap" class="youtube-wrap hidden">
+        <iframe
+          id="youtubePlayer"
+          title="YouTube player"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          referrerpolicy="strict-origin-when-cross-origin"
+          allowfullscreen
+        ></iframe>
+      </div>
+      <div id="spotifyEmbedWrap" class="spotify-embed-wrap hidden" aria-hidden="true">
+        <div class="spotify-tap-prompt">
+          <span>Tap &#9654; in the Spotify player to start the music on this device.</span>
+          <button id="spotifyTapDismiss" class="spotify-tap-dismiss" type="button" aria-label="Hide Spotify player">&#10005;</button>
+        </div>
+        <div id="spotifyEmbedHost"></div>
+      </div>
+
+      <div id="songEditor" class="song-editor hidden" aria-live="polite">
+        <div class="song-editor-card">
+          <h3>Song timing</h3>
+
+          <label class="editor-field">
+            <span>Song name</span>
+            <input id="editSongName" type="text" />
+          </label>
+
+          <label class="editor-field">
+            <span>Short description</span>
+            <input id="editSongDescription" type="text" />
+          </label>
+
+          <label class="editor-field">
+            <span>Category</span>
+            <select id="editSongCategory" required></select>
+          </label>
+
+          <label class="editor-field" data-integrations-any>
+            <span id="songLinkLabel">Song link</span>
+            <input id="editSongLink" type="text" placeholder="https://..." />
+          </label>
+
+          <div class="editor-grid compact">
+            <label class="editor-field">
+              <span>Start time (min:sec)</span>
+              <input id="editStartTime" type="text" inputmode="numeric" placeholder="00:00" pattern="[0-9]+:[0-5]?[0-9]" required />
+            </label>
+
+            <label class="editor-field">
+              <span>Stop time (min:sec)</span>
+              <input id="editStopTime" type="text" inputmode="numeric" placeholder="00:00" pattern="[0-9]+:[0-5]?[0-9]" required />
+            </label>
+          </div>
+
+          <label class="editor-field">
+            <span>Copy to category</span>
+            <select id="copySongCategory"></select>
+          </label>
+          <p class="spotify-connection-status">Copies the saved song and timing; the original stays in its category. Save edits before copying.</p>
+          <button id="copySong" class="source-button secondary" type="button">Copy song</button>
+
+          <div class="editor-actions">
+            <button id="saveSongEdits" class="source-button" type="button">Save</button>
+            <button id="deleteSong" class="source-button secondary" type="button">Delete</button>
+            <button id="cancelSongEdit" class="source-button ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="categoryRenameEditor" class="song-editor hidden" role="dialog" aria-modal="true" aria-labelledby="categoryRenameTitle">
+        <div class="song-editor-card">
+          <h3 id="categoryRenameTitle">Rename category</h3>
+          <label class="editor-field">
+            <span>Category name</span>
+            <input id="categoryRenameInput" type="text" maxlength="60" />
+          </label>
+          <div class="editor-actions">
+            <button id="saveCategoryRename" class="source-button" type="button">Save</button>
+            <button id="cancelCategoryRename" class="source-button ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="soundboardTitleEditor" class="song-editor hidden" role="dialog" aria-modal="true" aria-labelledby="soundboardTitleEditorHeading">
+        <div class="song-editor-card">
+          <h3 id="soundboardTitleEditorHeading">Rename soundboard</h3>
+          <label class="editor-field">
+            <span>Soundboard name</span>
+            <input id="soundboardTitleInput" type="text" maxlength="60" />
+          </label>
+          <div class="editor-actions">
+            <button id="saveSoundboardTitle" class="source-button" type="button">Save</button>
+            <button id="cancelSoundboardTitle" class="source-button ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="scoreTeamsDialog" class="song-editor hidden" role="dialog" aria-modal="true" aria-labelledby="scoreTeamsHeading">
+        <div class="song-editor-card">
+          <h3 id="scoreTeamsHeading">Score announcement teams</h3>
+          <label class="editor-field">
+            <span>Home team name</span>
+            <input id="scoreHomeTeamName" type="text" maxlength="40" placeholder="Home" />
+          </label>
+          <label class="editor-field">
+            <span>Away team name</span>
+            <input id="scoreAwayTeamName" type="text" maxlength="40" placeholder="Away" />
+          </label>
+          <div class="editor-actions">
+            <button id="saveScoreTeamsButton" class="source-button" type="button">Save</button>
+            <button id="cancelScoreTeamsButton" class="source-button ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="scoreDialog" class="song-editor hidden" role="dialog" aria-modal="true" aria-labelledby="scoreDialogHeading">
+        <div class="song-editor-card">
+          <h3 id="scoreDialogHeading">Announce a goal</h3>
+          <label class="editor-field">
+            <span>Scorer number</span>
+            <input id="scoreScorerNumber" type="number" min="0" max="99" step="1" inputmode="numeric" required />
+          </label>
+          <label class="editor-field">
+            <span>Scoring team</span>
+            <select id="scoreTeamSelect" required></select>
+          </label>
+          <div class="score-assists">
+            <label class="editor-field">
+              <span>Assist 1 (optional)</span>
+              <input id="scoreAssistOne" type="number" min="0" max="99" step="1" inputmode="numeric" />
+            </label>
+            <label class="editor-field">
+              <span>Assist 2 (optional)</span>
+              <input id="scoreAssistTwo" type="number" min="0" max="99" step="1" inputmode="numeric" />
+            </label>
+          </div>
+          <label class="editor-field">
+            <span>Announcement voice</span>
+            <select id="scoreVoiceSelect">
+              <option value="">System default</option>
+            </select>
+          </label>
+          <div class="editor-actions">
+            <button id="announceScoreButton" class="source-button" type="button">Announce goal</button>
+            <button id="cancelScoreButton" class="source-button ghost" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
+
+      <details class="category-visibility-picker">
+        <summary>Choose visible categories</summary>
+        <div id="categoryVisibilityPicker" class="category-visibility-options"></div>
+      </details>
+      <p id="noVisibleCategoriesMessage" class="no-visible-categories hidden" role="status">All categories are hidden. Select a category above to show it.</p>
+      <main id="board" class="board"></main>
+
+      <section class="tips-box">
+        <h3>Good vibe tips</h3>
+        <ul>
+          <li>Keep the celebrations loud and positive for your team.</li>
+          <li>Use the “Their Goal” and “Winning Too Much” cues with a lighter touch.</li>
+          <li>Short clips work best during kids games so the crowd never loses the flow.</li>
+        </ul>
+      </section>
+    </div>
+
+    <div class="fullscreen-controls">
+      <button id="enterFullscreen" class="top-button neutral" type="button">Full screen</button>
+      <button id="exitFullscreen" class="top-button neutral" type="button" hidden>Exit full screen</button>
+    </div>
+
+    <div id="authOverlay" class="auth-overlay hidden">
+      <form id="authForm" class="auth-card" autocomplete="on">
+        <h2 id="authTitle">Log in</h2>
+        <label id="authUsernameField">Username <input name="username" type="text" autocomplete="username" required minlength="3" maxlength="32" /></label>
+        <label id="authEmailField" class="hidden">Recovery email <input name="email" type="email" autocomplete="email" maxlength="254" /></label>
+        <label id="authPasswordField">Password <input name="password" type="password" autocomplete="current-password" required maxlength="200" /></label>
+        <label id="authPasswordConfirmationField" class="hidden">Confirm password <input name="passwordConfirmation" type="password" autocomplete="new-password" minlength="8" maxlength="200" /></label>
+        <label id="authInviteField" class="hidden">Invite code <input name="invite" type="text" autocomplete="off" /></label>
+        <p id="authError" class="auth-error" role="alert"></p>
+        <button id="authSubmit" class="top-button accent" type="submit">Log in</button>
+        <button id="authToggle" class="auth-link" type="button"></button>
+        <button id="authForgot" class="auth-link" type="button">Forgot password?</button>
+        <button id="authBack" class="auth-link hidden" type="button">Back to log in</button>
+      </form>
+    </div>
+    <div id="adminOverlay" class="auth-overlay hidden">
+      <div class="auth-card admin-card" role="dialog" aria-labelledby="adminTitle">
+        <h2 id="adminTitle">Admin panel</h2>
+        <p id="adminMessage" class="auth-error" role="status"></p>
+        <form id="adminIntegrationsForm" class="admin-integrations" autocomplete="off">
+          <h3>Music integrations</h3>
+          <p>Applies to everyone. Unchecking a service hides its songs and controls without deleting saved data.</p>
+          <div class="admin-integration-options">
+            <label class="admin-check"><input name="spotifyEnabled" type="checkbox" /> Spotify</label>
+            <label class="admin-check"><input name="youtubeEnabled" type="checkbox" /> YouTube</label>
+            <label class="admin-check"><input name="appleMusicEnabled" type="checkbox" /> Apple Music</label>
+          </div>
+          <button id="adminUsePreviousApiSetup" class="source-button secondary" type="button">Copy my previous API settings into this form</button>
+          <p>Copied credentials are not shared until you select Save integrations.</p>
+          <div data-admin-integration="spotify">
+            <label>Shared Spotify Client ID <input name="spotifyClientId" type="text" maxlength="128" /></label>
+            <p>Register each soundboard address as a redirect URI in your developer app. Users connect their own accounts in Settings.</p>
+          </div>
+          <div data-admin-integration="youtube">
+            <label>Shared YouTube API key <input name="youtubeApiKey" type="password" maxlength="256" placeholder="Leave blank to keep the stored key" autocomplete="new-password" /></label>
+            <p id="adminYoutubeKeyStatus"></p>
+            <label class="admin-check"><input name="clearYoutubeKey" type="checkbox" /> Clear stored API key</label>
+          </div>
+          <div data-admin-integration="appleMusic">
+            <p>Apple Music signing credentials stay in the server environment; never paste the private key here.</p>
+            <button id="adminCheckAppleMusic" class="source-button secondary" type="button">Check server setup</button>
+            <p id="adminAppleMusicStatus" role="status"></p>
+          </div>
+          <button id="saveAdminIntegrations" class="source-button" type="submit" disabled>Save integrations</button>
+          <p id="adminIntegrationStatus" role="status" aria-live="polite"></p>
+        </form>
+        <form id="adminCreateForm" class="admin-create" autocomplete="off">
+          <h3>Create user</h3>
+          <label>Username <input name="username" type="text" required minlength="3" maxlength="32" /></label>
+          <label>Email (optional) <input name="email" type="email" maxlength="254" /></label>
+          <label>Password <input name="password" type="password" required minlength="8" maxlength="200" autocomplete="new-password" /></label>
+          <label class="admin-check"><input name="isAdmin" type="checkbox" /> Admin</label>
+          <button class="top-button accent" type="submit">Create user</button>
+        </form>
+        <section class="admin-default-board" aria-labelledby="adminDefaultBoardHeading">
+          <h3 id="adminDefaultBoardHeading">Default categories</h3>
+          <p id="adminDefaultBoardStatus" role="status" aria-live="polite">Loading default categories...</p>
+          <button id="adminSaveDefaultBoard" class="source-button secondary" type="button">Save my categories as the default</button>
+          <p class="admin-hint">New users start with this snapshot, including its songs. Use Apply defaults below to reset an existing user.</p>
+        </section>
+        <section class="admin-existing-users" aria-labelledby="adminUsersHeading">
+          <h3 id="adminUsersHeading">Existing users</h3>
+          <div class="admin-users-scroll" tabindex="0" role="region" aria-label="Existing users table">
+            <table class="admin-users-table">
+              <thead>
+                <tr><th scope="col">User</th><th scope="col">Password</th><th scope="col">Access</th><th scope="col">Categories</th></tr>
+              </thead>
+              <tbody id="adminUsers"></tbody>
+            </table>
+          </div>
+        </section>
+        <button id="adminClose" class="auth-link" type="button">Close</button>
+      </div>
+    </div>
+    <div id="authNotice" class="auth-notice" role="status" hidden></div>
+    <div id="emailVerifyOverlay" class="auth-overlay hidden">
+      <form id="emailVerifyForm" class="auth-card">
+        <h2>Verify recovery email</h2>
+        <p>Confirm that you own this email address before using it to reset your password.</p>
+        <p id="emailVerifyError" class="auth-error" role="alert"></p>
+        <button id="emailVerifySubmit" class="top-button accent" type="submit">Verify email</button>
+        <button id="emailVerifyCancel" class="auth-link" type="button">Continue to the app</button>
+      </form>
+    </div>
+
+    <div class="side-menu">
+      <button class="side-menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sideMenuList">☰</button>
+      <div id="sideMenuList" class="side-menu-list hidden">
+        <button id="settingsToggle" class="side-menu-item" type="button" aria-controls="settingsPanel" aria-expanded="false">Settings</button>
+        <button id="adminPanelLink" class="side-menu-item hidden" type="button" aria-controls="adminOverlay">Admin panel</button>
+      </div>
+    </div>
+    <div id="gameRulesDialog" class="song-editor game-rules-editor hidden" role="dialog" aria-modal="true" aria-labelledby="gameRulesHeading">
+      <div class="song-editor-card game-rules-card">
+        <div class="settings-dialog-header">
+          <h2 id="gameRulesHeading">Game Rules</h2>
+          <button id="closeGameRules" class="source-button ghost" type="button">Close</button>
+        </div>
+        <p class="game-rules-subtitle">SKAHA / Sno-King Amateur Hockey Association - 12U</p>
+        <p class="game-rules-notice">Quick reference for <strong>12U C recreational / Metropolitan Hockey League (MHL)</strong> games. Select, tournament, and playoff formats may differ. Confirm your game's rules with the officials and team manager. This summary is not a replacement for the official rules.</p>
+        <p class="game-rules-reviewed">Sources checked October 5, 2026. USA Hockey playing-rule cycle: 2025-2029. Local pages do not identify a season-specific edition.</p>
+        <section class="game-rules-section">
+          <h3>Game clock - Sno-King 12U C</h3>
+          <ul>
+            <li><strong>Ice slot:</strong> 60 minutes, with a 5-minute warm-up.</li>
+            <li><strong>Periods 1 and 2:</strong> 15 minutes each, running clock.</li>
+            <li><strong>Period 3:</strong> 12 minutes, stop clock, subject to ice curfew.</li>
+            <li><strong>Timeouts:</strong> MHL does not allow timeouts during regular-season games.</li>
+          </ul>
+          <p class="game-rules-source">Sources: <a href="https://snokinghockey.com/club/gameday-resources" target="_blank" rel="noopener noreferrer">Sno-King game-day resources</a> and <a href="https://themhl.org/rules#game-clock" target="_blank" rel="noopener noreferrer">MHL game clock</a>.</p>
+        </section>
+        <section class="game-rules-section">
+          <h3>Minor penalties - MHL 12U</h3>
+          <ul>
+            <li><strong>Running clock:</strong> 3:00 minutes.</li>
+            <li><strong>Stop clock:</strong> 1:00 minute.</li>
+            <li>MHL instructs scorekeepers to halve penalty time remaining at the end of period 2 when transitioning to stop-clock play. Confirm the adjustment with the officials.</li>
+            <li>These are MHL minor-penalty timings, not a universal 12U penalty duration. For majors, misconducts, or other penalties, follow the officials and applicable rulebook.</li>
+          </ul>
+          <p class="game-rules-source">Source: <a href="https://themhl.org/rules#minor-penalty-length" target="_blank" rel="noopener noreferrer">MHL minor-penalty and game-clock rules</a>.</p>
+        </section>
+        <section class="game-rules-section">
+          <h3>Ice curfew</h3>
+          <ul>
+            <li>Home scorekeepers and officials must finish within the scheduled ice slot; an overrun requires Sno-King Hockey and arena staff approval.</li>
+            <li>Before period 3, tell the referees how much actual ice time remains.</li>
+            <li>If fewer than 24 minutes remain for a normal 12-minute stop-clock period, Sno-King requires shortening it to half the remaining ice time.</li>
+            <li><strong>Example:</strong> 20 minutes left in the ice slot means a 10-minute stop-clock third period. Coordinate with referees; they inform the coaches.</li>
+          </ul>
+          <p class="game-rules-source">Source: <a href="https://snokinghockey.com/club/gameday-resources" target="_blank" rel="noopener noreferrer">Sno-King ice-curfew guidance</a>.</p>
+        </section>
+        <section class="game-rules-section">
+          <h3>USA Hockey 12U playing rules</h3>
+          <ul>
+            <li><strong>No body checking in 12U games.</strong> Legal body contact is different from body checking.</li>
+            <li><strong>Immediate offside:</strong> 12U does not use the delayed/tag-up offside exception for older divisions.</li>
+            <li><strong>Icing while shorthanded:</strong> 12U does not receive the older-division exemption; normal icing rules still apply on a penalty kill.</li>
+            <li><strong>Neck-laceration protection:</strong> required for youth players under the current USA Hockey rules.</li>
+          </ul>
+          <p class="game-rules-source">Sources: USA Hockey's <a href="https://www.usahockey.com/news_article/show/1015867" target="_blank" rel="noopener noreferrer">body-contact / checking explanation</a> and <a href="https://www.usahockey.com/news_article/show/1346217" target="_blank" rel="noopener noreferrer">2025-2029 rule updates</a>.</p>
+        </section>
+        <section class="game-rules-section">
+          <h3>Official references and event exceptions</h3>
+          <p>Sno-King directs playing-rule questions to USA Hockey and PNAHA. Its game-day page currently links older rulebook editions; use the current USA Hockey rulebook for the 2025-2029 cycle. Check the event's published rules for overtime, shootouts, mercy rules, and tournament-specific timing rather than assuming a standard.</p>
+          <ul>
+            <li><a href="https://www.usahockeyrulebook.com/page/7463/official-rules-casebook-2025-2029" target="_blank" rel="noopener noreferrer">USA Hockey 2025-2029 Official Rules &amp; Casebook</a></li>
+            <li><a href="https://snokinghockey.com/club/bylaws" target="_blank" rel="noopener noreferrer">SKAHA policies and bylaws</a></li>
+            <li><a href="https://www.pnaha.com/" target="_blank" rel="noopener noreferrer">PNAHA official website</a></li>
+            <li><a href="https://snokinghockey.com/club/tournaments" target="_blank" rel="noopener noreferrer">Sno-King tournament information</a></li>
+          </ul>
+        </section>
+      </div>
+    </div>
+    <div id="playlistConversionDialog" class="song-editor game-rules-editor hidden" data-integrations-any role="dialog" aria-modal="true" aria-labelledby="playlistConversionHeading">
+      <div class="song-editor-card game-rules-card">
+        <div class="settings-dialog-header">
+          <h2 id="playlistConversionHeading">Playlist Conversion</h2>
+          <button id="closePlaylistConversion" class="source-button ghost" type="button">Close</button>
+        </div>
+        <p id="conversionIntro">Paste a playlist link to download a CSV. This does not change songs in your soundboard.</p>
+        <label class="editor-field">
+          <span>Playlist link</span>
+          <input id="playlistConversionUrl" type="url" placeholder="https://..." />
+        </label>
+        <label class="editor-field">
+          <span>CSV file name</span>
+          <input id="playlistConversionFilename" type="text" placeholder="My playlist" />
+        </label>
+        <p class="spotify-connection-status">Columns: Artist, Length (min:sec), Song Name, Song Link. Unavailable durations are left blank.</p>
+        <p class="spotify-connection-status" data-integration="spotify">Spotify requires your account connection in Settings and a playlist the app can access.</p>
+        <p class="spotify-connection-status" data-integration="youtube">YouTube uses the shared server API key. Artist values are uploader/channel names, not verified performing artists.</p>
+        <p class="spotify-connection-status" data-integration="appleMusic">Apple Music requires server-configured developer credentials and a public playlist.</p>
+        <button id="convertPlaylist" class="source-button" type="button">Download CSV</button>
+        <p id="playlistConversionStatus" role="status" aria-live="polite"></p>
+      </div>
+    </div>
+    <script src="integration-controls.js?v=2"></script>
+    <script src="apple-music.js?v=4"></script>
+    <script src="auth.js?v=29"></script>
+    <script src="roster.js?v=11"></script>
+    <script src="score-sheet.js?v=1"></script>
+    <script src="game-rules.js?v=1"></script>
+  </body>
+</html>
