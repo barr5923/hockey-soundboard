@@ -1,0 +1,17 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+*.sqlite3
+.venv/
+venv/
+.env
+*.log
+tests/
+*.ipynb
+temp-*.png
+sample-test.mp3
+deploy-azure.ps1
+setup-hosting.ps1

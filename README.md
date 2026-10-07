@@ -73,6 +73,24 @@ visible. Offline clients use the last app-wide configuration cached on that
 device. If configuration cannot load online, integration controls fail closed
 with a visible error, while local audio remains usable.
 
+## Deploying to fly.io
+
+The repo includes a `Dockerfile` and `fly.toml` for the app `hockey-soundboard`.
+Users and boards are stored in SQLite on a persistent volume mounted at `/data`.
+
+```powershell
+fly auth login
+fly secrets set SOUNDBOARD_ADMIN_PASSWORD="choose-a-strong-password" -a hockey-soundboard
+fly deploy
+```
+
+`fly deploy` creates the `soundboard_data` volume on the first deploy if it
+does not exist (or create it yourself with
+`fly volumes create soundboard_data --size 1 -r ord -a hockey-soundboard`).
+`SOUNDBOARD_ADMIN_PASSWORD` only sets the password when the `admin` user is
+first created on a fresh database. Add `https://hockey-soundboard.fly.dev` to
+any Spotify/Microsoft redirect URI allow-lists you use.
+
 ## Playlist conversion
 
 Choose **Playlist Conversion** in the menu, paste a Spotify, YouTube, or public Apple Music playlist
