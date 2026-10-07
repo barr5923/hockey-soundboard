@@ -31,5 +31,11 @@ jobs:
       - name: Sync admin password secret
         if: ${{ env.ADMIN_PW != '' }}
         run: flyctl secrets set SOUNDBOARD_ADMIN_PASSWORD="$ADMIN_PW" --stage -a "$FLY_APP"
+      - name: Ensure public IPs exist
+        run: |
+          if [ "$(flyctl ips list -a "$FLY_APP" --json | jq length)" = "0" ]; then
+            flyctl ips allocate-v4 --shared -a "$FLY_APP"
+            flyctl ips allocate-v6 -a "$FLY_APP"
+          fi
       - name: Deploy (single machine, SQLite on volume)
         run: flyctl deploy --remote-only --ha=false -a "$FLY_APP"
