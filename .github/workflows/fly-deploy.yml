@@ -23,6 +23,8 @@ jobs:
           if ! flyctl volumes list -a "$FLY_APP" --json | grep -q '"name": *"soundboard_data"'; then
             flyctl volumes create soundboard_data --size 1 --region "$FLY_REGION" -a "$FLY_APP" --yes
           fi
+          flyctl volumes list -a "$FLY_APP" --json
+          flyctl machines list -a "$FLY_APP"
       - name: Sync admin password secret
         if: ${{ env.ADMIN_PW != '' }}
         run: flyctl secrets set SOUNDBOARD_ADMIN_PASSWORD="$ADMIN_PW" --stage -a "$FLY_APP"
