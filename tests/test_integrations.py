@@ -82,6 +82,19 @@ class IntegrationTests(unittest.TestCase):
         self.save((True, True, True), youtubeApiKey='')
         self.assertFalse(self.call('api_integrations')[1]['youtubeConfigured'])
 
+    def test_google_client_id_is_public_preserved_and_validated(self):
+        self.assertEqual(self.call('api_integrations')[1]['googleClientId'], '')
+        client_id = '1234-abc.apps.googleusercontent.com'
+        self.assertEqual(self.save((True, True, True), googleClientId=f' {client_id} ')[0], 200)
+        self.assertEqual(self.call('api_integrations', None)[1]['googleClientId'], client_id)
+        self.save((True, False, True))
+        self.assertEqual(self.call('api_integrations')[1]['googleClientId'], client_id)
+        for bad in [12, 'x' * 257, 'bad id<script>']:
+            self.assertEqual(self.save((True, True, True), googleClientId=bad)[0], 400)
+        self.assertEqual(self.call('api_integrations')[1]['googleClientId'], client_id)
+        self.save((True, True, True), googleClientId='')
+        self.assertEqual(self.call('api_integrations')[1]['googleClientId'], '')
+
     def test_invalid_updates_do_not_change_previous_config(self):
         self.save((True, False, True))
         previous = self.call('api_integrations')[1]

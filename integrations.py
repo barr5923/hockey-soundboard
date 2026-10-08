@@ -1,12 +1,14 @@
 """App-wide music integration configuration, separate from user settings."""
 
 import json
+import re
 
 PROVIDERS = ('spotify', 'youtube', 'appleMusic')
 DEFAULT_CONFIG = {
     'enabled': {provider: True for provider in PROVIDERS},
     'spotifyClientId': '',
-    'youtubeApiKey': ''
+    'youtubeApiKey': '',
+    'googleClientId': ''
 }
 
 
@@ -14,14 +16,15 @@ def read_config(connection):
     row = connection.execute("SELECT value FROM app_config WHERE key = 'integrations'").fetchone()
     if not row:
         return {**DEFAULT_CONFIG, 'enabled': dict(DEFAULT_CONFIG['enabled'])}
-    return json.loads(row['value'])
+    return {**DEFAULT_CONFIG, **json.loads(row['value'])}
 
 
 def public_config(config):
     return {
         'enabled': config['enabled'],
         'spotifyClientId': config['spotifyClientId'],
-        'youtubeConfigured': bool(config['youtubeApiKey'])
+        'youtubeConfigured': bool(config['youtubeApiKey']),
+        'googleClientId': config.get('googleClientId', '')
     }
 
 
@@ -38,10 +41,15 @@ def validate_update(body, previous):
     api_key = body.get('youtubeApiKey', previous['youtubeApiKey'])
     if not isinstance(api_key, str) or len(api_key) > 256:
         raise ValueError('Invalid shared API key.')
+    google_client_id = body.get('googleClientId', previous.get('googleClientId', ''))
+    if (not isinstance(google_client_id, str) or len(google_client_id) > 256
+            or not re.fullmatch(r'[A-Za-z0-9._-]*', google_client_id.strip())):
+        raise ValueError('Invalid Google OAuth client ID.')
     return {
         'enabled': dict(enabled),
         'spotifyClientId': client_id.strip(),
-        'youtubeApiKey': api_key.strip()
+        'youtubeApiKey': api_key.strip(),
+        'googleClientId': google_client_id.strip()
     }
 
 

@@ -9,7 +9,7 @@
         || Object.keys(providers).some((key) => typeof value.enabled?.[key] !== 'boolean')) {
       throw new Error('The server returned invalid integration settings.');
     }
-    return value;
+    return { ...value, googleClientId: typeof value.googleClientId === 'string' ? value.googleClientId : '' };
   }
 
   function names() {

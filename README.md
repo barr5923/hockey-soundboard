@@ -118,6 +118,37 @@ YouTube artist values are uploader/channel names, not verified performing artist
 Unavailable song lengths are left blank. Conversion reads all playlist pages
 and reports API failures instead of exporting a silently incomplete response.
 
+## Playlist Converter (Spotify to YouTube)
+
+Choose **Playlist Converter** in the menu, paste a Spotify playlist link,
+optionally name the new playlist and pick its privacy, then select
+**Convert to YouTube**. After you sign in with Google, the app searches YouTube
+for each song and adds the best match to a new playlist in your YouTube account.
+Songs that can't be matched (or are skipped) are listed in a table with
+Artist, Song, Length, and Reason, and can be downloaded as a CSV. Select
+**Stop converting** to stop partway through; the remaining songs are listed as skipped.
+The menu item only appears when both Spotify and YouTube are enabled.
+
+One-time admin setup in Google Cloud Console:
+
+1. Use (or create) a project and enable **YouTube Data API v3**.
+2. Configure the **OAuth consent screen** (External). While it is in *Testing*,
+   add every Google account that will convert playlists as a test user, or
+   publish the app.
+3. Create **Credentials → OAuth client ID → Web application** and add
+   **Authorized JavaScript origins** for every address you use, for example
+   `https://hockey-soundboard.fly.dev`, `http://127.0.0.1`, and `http://localhost`.
+   No redirect URI or client secret is needed. Google does not accept LAN IP
+   addresses such as `192.168.x.x`, so convert playlists from the fly.dev site
+   or on the server computer itself.
+4. Paste the client ID into **Admin panel → Music integrations → Google OAuth
+   Client ID** and save.
+
+The Google account needs a YouTube channel. YouTube's default quota is 10,000
+units per day per project; each song uses about 150 units, so roughly 60 songs
+can be converted per day. Songs not reached because the quota ran out are listed
+as skipped. Matching is automatic, so check the new playlist for wrong matches.
+
 ## Apple Music imports (metadata and links only)
 
 Apple Music public playlists can be imported from Music library, expanded from

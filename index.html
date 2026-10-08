@@ -469,6 +469,8 @@
             <label>Shared YouTube API key <input name="youtubeApiKey" type="password" maxlength="256" placeholder="Leave blank to keep the stored key" autocomplete="new-password" /></label>
             <p id="adminYoutubeKeyStatus"></p>
             <label class="admin-check"><input name="clearYoutubeKey" type="checkbox" /> Clear stored API key</label>
+            <label>Google OAuth Client ID (Playlist Converter) <input name="googleClientId" type="text" maxlength="256" placeholder="1234-abc.apps.googleusercontent.com" /></label>
+            <p>Create a "Web application" OAuth client in Google Cloud with the YouTube Data API v3 enabled, and add each soundboard address (for example https://hockey-soundboard.fly.dev) as an Authorized JavaScript origin. Users sign in with their own Google account when converting.</p>
           </div>
           <div data-admin-integration="appleMusic">
             <p>Apple Music signing credentials stay in the server environment; never paste the private key here.</p>
@@ -608,11 +610,58 @@
         <p id="playlistConversionStatus" role="status" aria-live="polite"></p>
       </div>
     </div>
-    <script src="integration-controls.js?v=2"></script>
+    <div id="playlistConverterDialog" class="song-editor game-rules-editor hidden" role="dialog" aria-modal="true" aria-labelledby="playlistConverterHeading">
+      <div class="song-editor-card game-rules-card">
+        <div class="settings-dialog-header">
+          <h2 id="playlistConverterHeading">Playlist Converter</h2>
+          <button id="closePlaylistConverter" class="source-button ghost" type="button">Close</button>
+        </div>
+        <p>Copy a Spotify playlist into a new playlist in your YouTube account. Songs that cannot be found are listed below so you can download them as a CSV.</p>
+        <label class="editor-field">
+          <span>Spotify playlist link</span>
+          <input id="playlistConverterUrl" type="url" placeholder="https://open.spotify.com/playlist/..." />
+        </label>
+        <label class="editor-field">
+          <span>New YouTube playlist name (optional)</span>
+          <input id="playlistConverterName" type="text" maxlength="150" placeholder="Same as the Spotify playlist" />
+        </label>
+        <label class="editor-field">
+          <span>YouTube playlist privacy</span>
+          <select id="playlistConverterPrivacy">
+            <option value="private">Private</option>
+            <option value="unlisted">Unlisted</option>
+            <option value="public">Public</option>
+          </select>
+        </label>
+        <p class="spotify-connection-status">You will be asked to sign in with Google. Spotify must be connected in Settings. YouTube limits each app to roughly 60 converted songs per day; songs not reached are listed as skipped.</p>
+        <p id="playlistConverterSetup" class="spotify-connection-status" hidden>The administrator must add a Google OAuth Client ID in the Admin panel before playlists can be converted.</p>
+        <button id="runPlaylistConverter" class="source-button" type="button">Convert to YouTube</button>
+        <p id="playlistConverterStatus" role="status" aria-live="polite"></p>
+        <p id="playlistConverterResult" hidden><a id="playlistConverterLink" href="#" target="_blank" rel="noopener noreferrer">Open the YouTube playlist</a></p>
+        <section id="playlistConverterMissing" hidden aria-labelledby="playlistConverterMissingHeading">
+          <h3 id="playlistConverterMissingHeading">Songs not added</h3>
+          <div class="admin-users-scroll" tabindex="0" role="region" aria-label="Songs not added">
+            <table class="admin-users-table converter-missing-table">
+              <thead>
+                <tr><th scope="col">Artist</th><th scope="col">Song</th><th scope="col">Length</th><th scope="col">Reason</th></tr>
+              </thead>
+              <tbody id="playlistConverterMissingRows"></tbody>
+            </table>
+          </div>
+          <label class="editor-field">
+            <span>CSV file name</span>
+            <input id="playlistConverterCsvName" type="text" placeholder="Songs not found" />
+          </label>
+          <button id="downloadPlaylistConverterCsv" class="source-button secondary" type="button">Download CSV of missing songs</button>
+        </section>
+      </div>
+    </div>
+    <script src="integration-controls.js?v=3"></script>
     <script src="apple-music.js?v=4"></script>
-    <script src="auth.js?v=29"></script>
+    <script src="auth.js?v=30"></script>
     <script src="roster.js?v=11"></script>
     <script src="score-sheet.js?v=1"></script>
     <script src="game-rules.js?v=1"></script>
+    <script src="playlist-converter.js?v=1"></script>
   </body>
 </html>

@@ -306,6 +306,7 @@
       const config = await call('GET', '/api/admin/integrations');
       providers.forEach((provider) => { fields[`${provider}Enabled`].checked = config.enabled[provider]; });
       fields.spotifyClientId.value = config.spotifyClientId;
+      fields.googleClientId.value = config.googleClientId || '';
       fields.youtubeApiKey.value = '';
       fields.clearYoutubeKey.checked = false;
       document.getElementById('adminYoutubeKeyStatus').textContent = config.youtubeConfigured
@@ -419,7 +420,8 @@
       integrationStatus.textContent = 'Saving integration settings...';
       const body = {
         enabled: Object.fromEntries(providers.map((provider) => [provider, fields[`${provider}Enabled`].checked])),
-        spotifyClientId: fields.spotifyClientId.value.trim()
+        spotifyClientId: fields.spotifyClientId.value.trim(),
+        googleClientId: fields.googleClientId.value.trim()
       };
       if (fields.clearYoutubeKey.checked) body.youtubeApiKey = '';
       else if (fields.youtubeApiKey.value.trim()) body.youtubeApiKey = fields.youtubeApiKey.value.trim();

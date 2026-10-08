@@ -1,15 +1,16 @@
-const CACHE_NAME = 'hockey-soundboard-shell-v56';
+const CACHE_NAME = 'hockey-soundboard-shell-v57';
 const APP_SHELL = [
   './index.html',
   './how-to.html',
   './styles.css?v=71',
   './app.js?v=103',
-  './integration-controls.js?v=2',
+  './integration-controls.js?v=3',
   './apple-music.js?v=4',
-  './auth.js?v=29',
+  './auth.js?v=30',
   './roster.js?v=11',
   './score-sheet.js?v=1',
   './game-rules.js?v=1',
+  './playlist-converter.js?v=1',
   './manifest.webmanifest',
   './seattle-thunderbirds-logo.svg',
   './sounds/among-us-drip-theme.mp3',
