@@ -6,6 +6,7 @@
   const sections = [];
   const metadata = [];
   let savedValues = {};
+  let undoSnapshot = null;
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -38,12 +39,16 @@
   const status = el('p', 'score-sheet-status');
   status.setAttribute('role', 'status');
   const hint = el('p', 'score-sheet-hint', 'Fill in the blank sheet below. Entries save on this browser. Download PDF exports the completed sheet; typed sign-offs are not digital signatures.');
+  const workspace = el('div', 'score-sheet-workspace');
+  const quickControls = el('aside', 'score-sheet-quick-controls');
+  quickControls.setAttribute('aria-label', 'Quick score sheet controls');
   const scroll = el('div', 'score-sheet-scroll');
   const sheet = el('div', 'game-score-sheet');
   sheet.setAttribute('aria-label', 'Blank hockey game score sheet');
   sheet.appendChild(el('h4', 'score-sheet-title', 'HOCKEY GAME SCORE SHEET'));
   scroll.appendChild(sheet);
-  card.append(toolbar, hint, status, scroll);
+  workspace.append(quickControls, scroll);
+  card.append(toolbar, hint, status, workspace);
   dialog.appendChild(card);
   document.body.appendChild(dialog);
 
@@ -205,6 +210,187 @@
   tableSection('visitor-penalties', 'PENALTIES - VISITOR', 16, 764, 384, penaltyColumns, 12, 19);
   tableSection('home-penalties', 'PENALTIES - HOME', 400, 764, 384, penaltyColumns, 12, 19);
 
+  const fieldsByKey = Object.fromEntries(fields.map((entry) => [entry.key, entry.input]));
+  const teamNames = {
+    visitor: 'Visitor',
+    home: 'Home'
+  };
+
+  function quickControl(labelText, control) {
+    const label = el('label', 'score-sheet-quick-field');
+    label.append(el('span', '', labelText), control);
+    return label;
+  }
+
+  quickControls.appendChild(el('h4', '', 'Live Game Entry'));
+  quickControls.appendChild(el('p', 'score-sheet-quick-note',
+    'Quick entries update the matching scoring, goalie, and penalty rows below.'));
+
+  const team = el('select');
+  team.innerHTML = '<option value="visitor">Visitor</option><option value="home">Home</option>';
+  const period = el('select');
+  period.innerHTML = '<option value="1">Period 1</option><option value="2">Period 2</option><option value="3">Period 3</option><option value="OT">OT</option>';
+  const gameTime = el('input');
+  gameTime.type = 'text';
+  gameTime.maxLength = 8;
+  gameTime.placeholder = 'MM:SS';
+  gameTime.autocomplete = 'off';
+  const player = el('input');
+  player.type = 'text';
+  player.maxLength = 3;
+  player.placeholder = 'Player #';
+  player.autocomplete = 'off';
+  const assistOne = el('input');
+  assistOne.type = 'text';
+  assistOne.maxLength = 3;
+  assistOne.placeholder = 'Assist 1';
+  assistOne.autocomplete = 'off';
+  const assistTwo = el('input');
+  assistTwo.type = 'text';
+  assistTwo.maxLength = 3;
+  assistTwo.placeholder = 'Assist 2';
+  assistTwo.autocomplete = 'off';
+  const penaltyName = el('input');
+  penaltyName.type = 'text';
+  penaltyName.maxLength = 60;
+  penaltyName.placeholder = 'Penalty type';
+  penaltyName.autocomplete = 'off';
+  const penaltyMinutes = el('select');
+  penaltyMinutes.innerHTML = '<option value="2">2 min</option><option value="4">4 min</option><option value="5">5 min</option><option value="10">10 min</option>';
+
+  quickControls.append(
+    quickControl('Team', team),
+    quickControl('Period', period),
+    quickControl('Game time', gameTime),
+    quickControl('Player #', player),
+    quickControl('Assist 1', assistOne),
+    quickControl('Assist 2', assistTwo),
+    quickControl('Penalty', penaltyName),
+    quickControl('Minutes', penaltyMinutes)
+  );
+
+  const quickButtons = el('div', 'score-sheet-quick-buttons');
+  const goalButton = el('button', 'score-sheet-quick-button goal', 'Goal for team');
+  const saveButton = el('button', 'score-sheet-quick-button', 'Save by team');
+  const shotButton = el('button', 'score-sheet-quick-button', 'Shot on team');
+  const penaltyButton = el('button', 'score-sheet-quick-button penalty', 'Add penalty');
+  const undoButton = el('button', 'score-sheet-quick-button undo', 'Undo last entry');
+  [goalButton, saveButton, shotButton, penaltyButton, undoButton].forEach((button) => {
+    button.type = 'button';
+  });
+  quickButtons.append(goalButton, saveButton, shotButton, penaltyButton, undoButton);
+  quickControls.appendChild(quickButtons);
+
+  function currentPeriodColumn() {
+    return period.value === 'OT' ? 5 : Number(period.value) + 1;
+  }
+
+  function snapshotValues() {
+    undoSnapshot = new Map(fields.map(({ input }) => [input, input.value]));
+  }
+
+  function setNumericValue(input, value) {
+    if (!input) return;
+    input.value = String(Math.max(0, (Number.parseInt(input.value, 10) || 0) + value));
+  }
+
+  function firstEmptyRow(prefix, rowCount) {
+    for (let row = 0; row < rowCount; row += 1) {
+      const cells = fields.filter(({ key }) => key.startsWith(`${prefix}-${row}-`));
+      if (cells.every(({ input }) => !input.value.trim())) return row;
+    }
+    return -1;
+  }
+
+  function recordGoalieStat(teamKey, stat, amount = 1) {
+    const row = stat === 'shots' ? 0 : 1;
+    setNumericValue(fieldsByKey[`${teamKey}-goalies-${row}-${currentPeriodColumn()}`], amount);
+    setNumericValue(fieldsByKey[`${teamKey}-goalies-${row}-6`], amount);
+  }
+
+  function failQuickAction(message) {
+    status.textContent = message;
+    status.classList.add('is-error');
+  }
+
+  function finishQuickAction(message) {
+    save();
+    if (!status.classList.contains('is-error')) {
+      status.textContent = message;
+    }
+  }
+
+  goalButton.addEventListener('click', () => {
+    const teamKey = team.value;
+    const row = firstEmptyRow(`${teamKey}-scoring`, 13);
+    if (row < 0) {
+      failQuickAction(`${teamNames[teamKey]} scoring has no blank rows left.`);
+      return;
+    }
+    if (!player.value.trim()) {
+      failQuickAction('Enter the goal scorer number first.');
+      player.focus();
+      return;
+    }
+    snapshotValues();
+    fieldsByKey[`${teamKey}-scoring-${row}-0`].value = period.value;
+    fieldsByKey[`${teamKey}-scoring-${row}-1`].value = gameTime.value.trim();
+    fieldsByKey[`${teamKey}-scoring-${row}-2`].value = player.value.trim();
+    fieldsByKey[`${teamKey}-scoring-${row}-3`].value = assistOne.value.trim();
+    fieldsByKey[`${teamKey}-scoring-${row}-4`].value = assistTwo.value.trim();
+    setNumericValue(fieldsByKey[`${teamKey}-score`], 1);
+    const defendingTeam = teamKey === 'home' ? 'visitor' : 'home';
+    recordGoalieStat(defendingTeam, 'shots');
+    finishQuickAction(`Goal added for ${teamNames[teamKey]}.`);
+  });
+
+  saveButton.addEventListener('click', () => {
+    snapshotValues();
+    recordGoalieStat(team.value, 'saves');
+    recordGoalieStat(team.value, 'shots');
+    finishQuickAction(`Save added for ${teamNames[team.value]}.`);
+  });
+
+  shotButton.addEventListener('click', () => {
+    snapshotValues();
+    recordGoalieStat(team.value, 'shots');
+    finishQuickAction(`Shot on ${teamNames[team.value]} added.`);
+  });
+
+  penaltyButton.addEventListener('click', () => {
+    const teamKey = team.value;
+    const row = firstEmptyRow(`${teamKey}-penalties`, 12);
+    if (row < 0) {
+      failQuickAction(`${teamNames[teamKey]} penalties have no blank rows left.`);
+      return;
+    }
+    if (!player.value.trim() || !penaltyName.value.trim()) {
+      failQuickAction('Enter a player number and penalty type first.');
+      (player.value.trim() ? penaltyName : player).focus();
+      return;
+    }
+    snapshotValues();
+    fieldsByKey[`${teamKey}-penalties-${row}-0`].value = period.value;
+    fieldsByKey[`${teamKey}-penalties-${row}-1`].value = player.value.trim();
+    fieldsByKey[`${teamKey}-penalties-${row}-2`].value = penaltyName.value.trim();
+    fieldsByKey[`${teamKey}-penalties-${row}-3`].value = penaltyMinutes.value;
+    fieldsByKey[`${teamKey}-penalties-${row}-4`].value = gameTime.value.trim();
+    fieldsByKey[`${teamKey}-penalties-${row}-5`].value = gameTime.value.trim();
+    finishQuickAction(`Penalty added for ${teamNames[teamKey]}.`);
+  });
+
+  undoButton.addEventListener('click', () => {
+    if (!undoSnapshot) {
+      failQuickAction('There is no quick entry to undo.');
+      return;
+    }
+    fields.forEach(({ input }) => {
+      input.value = undoSnapshot.get(input) ?? input.value;
+    });
+    undoSnapshot = null;
+    finishQuickAction('Last quick entry undone.');
+  });
+
   function drawText(context, text, x, y, width, size = 11, bold = false) {
     context.font = `${bold ? 'bold ' : ''}${size}px Arial`;
     const measured = context.measureText(text).width;
@@ -323,6 +509,7 @@
     fields.forEach(({ input }) => {
       input.value = '';
     });
+    undoSnapshot = null;
     save();
     if (!status.classList.contains('is-error')) {
       status.textContent = 'Score sheet reset. All entries have been cleared.';

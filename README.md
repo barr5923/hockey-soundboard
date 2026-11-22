@@ -352,8 +352,14 @@ with the officials and team manager, and consult the linked official documents.
 
 Open **Game Score Sheet** after **Team Roster** in the hamburger menu. The blank
 sheet includes game details, both 17-player rosters, scoring, goaltender records,
-coaches, officials, team contacts, and penalties. Entries are saved in this
-browser's local storage; they are not synced between devices.
+coaches, officials, team contacts, and penalties. Entries are saved in browser
+storage and synced with the signed-in soundboard account.
+
+The left-side **Live Game Entry** panel records goals, saves, shots on goal, and
+penalties directly into the corresponding rows. Goals update the selected
+team's score and the opposing goalie's shots; saves update the selected goalie's
+saves and shots. The last quick entry can be undone. On dual-screen devices, the
+entry panel uses the left screen segment while the full sheet stays on the right.
 
 Use **Download PDF** to save a completed, single-page Letter-size PDF, or download
 the blank sheet as a template. PDF creation runs locally without uploading player
