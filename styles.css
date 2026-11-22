@@ -1051,6 +1051,24 @@ body.game-mode .scorekeeper-category-actions {
 
 body.game-mode .scorekeeper-category-buttons {
   grid-template-columns: repeat(2, minmax(44px, 1fr));
+  gap: 5px;
+}
+
+body.game-mode .scorekeeper-category-buttons .score-sheet-quick-button {
+  min-height: clamp(36px, 5.5vh, 48px);
+  padding: 4px;
+  font-size: clamp(0.62rem, 2.2vw, 0.8rem);
+  line-height: 1.05;
+}
+
+body.game-mode .scorekeeper-category-buttons .score-sheet-quick-button.undo,
+body.game-mode .scorekeeper-category-buttons > :nth-last-child(-n + 3) {
+  display: none;
+}
+
+body.game-mode .scorekeeper-category-buttons > :nth-child(1),
+body.game-mode .scorekeeper-category-buttons > :nth-child(2) {
+  display: block;
 }
 
 .game-score-sheet {

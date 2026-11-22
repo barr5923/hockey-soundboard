@@ -314,13 +314,18 @@
   const categoryPenalty = el('button', 'score-sheet-quick-button penalty', 'Penalty');
   const categorySave = el('button', 'score-sheet-quick-button', 'Save');
   const categoryShot = el('button', 'score-sheet-quick-button', 'Shot');
+  const categoryHomeSave = el('button', 'score-sheet-quick-button', 'Home Save');
+  const categoryHomeShot = el('button', 'score-sheet-quick-button', 'Home Shot');
+  const categoryVisitorSave = el('button', 'score-sheet-quick-button', 'Visitor Save');
+  const categoryVisitorShot = el('button', 'score-sheet-quick-button', 'Visitor Shot');
   const categoryEdit = el('button', 'score-sheet-quick-button undo', 'Edit Sheet');
   const categoryHistory = el('button', 'score-sheet-quick-button undo', 'Game History');
   const categoryUndo = el('button', 'score-sheet-quick-button undo', 'Undo');
-  [categoryGoal, categoryPenalty, categorySave, categoryShot, categoryUndo, categoryEdit, categoryHistory]
+  [categoryGoal, categoryPenalty, categorySave, categoryShot, categoryHomeSave, categoryHomeShot,
+    categoryVisitorSave, categoryVisitorShot, categoryUndo, categoryEdit, categoryHistory]
     .forEach((button) => { button.type = 'button'; });
-  categoryButtons.append(categoryGoal, categoryPenalty, categorySave, categoryShot,
-    categoryUndo, categoryEdit, categoryHistory);
+  categoryButtons.append(categoryGoal, categoryPenalty, categoryHomeSave, categoryHomeShot,
+    categoryVisitorSave, categoryVisitorShot, categoryUndo, categoryEdit, categoryHistory);
   categoryActions.appendChild(categoryButtons);
 
   const eventDialog = el('div', 'song-editor score-sheet-entry-editor hidden');
@@ -518,6 +523,20 @@
     finishQuickAction(`Save added for ${teamNames[team.value]}.`);
   });
   categorySave.addEventListener('click', () => saveButton.click());
+  function addQuickStat(teamKey, stat) {
+    snapshotValues();
+    if (stat === 'save') {
+      recordGoalieStat(teamKey, 'saves');
+      recordGoalieStat(teamKey, 'shots');
+    } else {
+      recordGoalieStat(teamKey, 'shots');
+    }
+    finishQuickAction(`${stat === 'save' ? 'Save' : 'Shot'} added for ${teamNames[teamKey]}.`);
+  }
+  categoryHomeSave.addEventListener('click', () => addQuickStat('home', 'save'));
+  categoryHomeShot.addEventListener('click', () => addQuickStat('home', 'shot'));
+  categoryVisitorSave.addEventListener('click', () => addQuickStat('visitor', 'save'));
+  categoryVisitorShot.addEventListener('click', () => addQuickStat('visitor', 'shot'));
 
   shotButton.addEventListener('click', () => {
     snapshotValues();
