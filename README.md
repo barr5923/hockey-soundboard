@@ -1,5 +1,18 @@
 # Hockey Soundboard
 
+## Registration code
+
+Public account registration is closed until an administrator sets a registration
+code. Open **Admin panel**, enter a code of 8 to 200 characters under
+**Registration code**, and select **Save registration code**. Share the code
+privately with people who should be able to create an account. Existing users
+can still log in, and administrators can still create accounts directly.
+
+Saving a new code replaces the previous one. The server stores only a salted
+hash and does not display the code again. Repeated incorrect registration codes
+are temporarily rate-limited. An existing `SOUNDBOARD_INVITE` environment code
+continues to work until an administrator saves a code in the panel.
+
 ## Admin integration controls and shared API setup
 
 ### Shared app music

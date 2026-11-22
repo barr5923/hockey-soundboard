@@ -63,7 +63,9 @@ class AdminTests(unittest.TestCase):
 
     def test_non_admin_forbidden_and_anonymous_unauthorized(self):
         normal = {'id': 5, 'username': 'x', 'is_admin': 0}
-        for method in ('api_admin_users', 'api_admin_set_password', 'api_admin_set_admin', 'api_admin_create_user'):
+        for method in ('api_admin_users', 'api_admin_set_password', 'api_admin_set_admin',
+                       'api_admin_create_user', 'api_admin_registration_code',
+                       'api_save_registration_code'):
             self.assertEqual(self.call(method, normal, {})[0], 403)
             self.assertEqual(self.call(method, None, {})[0], 401)
 
@@ -82,6 +84,22 @@ class AdminTests(unittest.TestCase):
         self.assertEqual(server.hash_password('new-password', bob['salt']), bob['hash'])
         users = self.call('api_admin_users', admin)[1]['users']
         self.assertEqual([u['username'] for u in users], ['admin', 'bob'])
+
+    def test_admin_sets_registration_code_without_storing_plaintext(self):
+        admin = self.user('admin')
+        self.assertEqual(self.call('api_save_registration_code', admin, {'code': 'short'})[0], 400)
+        status, payload = self.call('api_save_registration_code', admin, {'code': 'private-invite'})
+        self.assertEqual((status, payload['configuredInAdmin']), (200, True))
+
+        stored = self.query('SELECT value FROM app_config WHERE key = ?',
+                            'registration_code')[0][0]
+        self.assertNotIn('private-invite', stored)
+        with server.get_db() as connection:
+            self.assertTrue(server.registration_code_matches(connection, 'private-invite'))
+            self.assertFalse(server.registration_code_matches(connection, 'wrong-invite'))
+        summary = self.call('api_admin_registration_code', admin)[1]
+        self.assertTrue(summary['configured'])
+        self.assertTrue(summary['configuredInAdmin'])
 
     def test_cannot_remove_last_admin(self):
         admin = self.user('admin')

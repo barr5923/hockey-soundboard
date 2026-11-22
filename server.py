@@ -72,6 +72,7 @@ PRIVATE_FILES = {
 db_lock = threading.Lock()
 failed_logins = {}
 reset_attempts = {}
+registration_attempts = {}
 reset_password_attempts = {}
 graph_token_cache_lock = threading.Lock()
 GRAPH_SCOPES = ['https://graph.microsoft.com/Mail.Send']
@@ -123,6 +124,7 @@ def read_audio_duration(path, size, modified_ns):
 
 
 DEFAULT_BOARD_CONFIG_KEY = 'default_board'
+REGISTRATION_CODE_CONFIG_KEY = 'registration_code'
 DEFAULT_BOARD_PLAYLISTS_KEY = 'hockey-soundboard-playlists-v1'
 DEFAULT_BOARD_KEYS = (
     DEFAULT_BOARD_PLAYLISTS_KEY,
@@ -131,6 +133,47 @@ DEFAULT_BOARD_KEYS = (
     'hockey-soundboard-category-settings-v1',
     'hockey-soundboard-hidden-categories-v1',
 )
+
+
+def read_registration_code_config(conn):
+    row = conn.execute('SELECT value FROM app_config WHERE key = ?', (REGISTRATION_CODE_CONFIG_KEY,)).fetchone()
+    if not row:
+        return None
+    try:
+        config = json.loads(row['value'])
+        salt = bytes.fromhex(config['salt'])
+        digest = bytes.fromhex(config['hash'])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+        raise RuntimeError('The saved registration code configuration is invalid.')
+    if len(salt) != 16 or len(digest) != 32:
+        raise RuntimeError('The saved registration code configuration is invalid.')
+    return {'salt': salt, 'hash': digest}
+
+
+def registration_code_enabled(conn):
+    return read_registration_code_config(conn) is not None or bool(INVITE_CODE)
+
+
+def registration_code_matches(conn, candidate):
+    config = read_registration_code_config(conn)
+    if config:
+        return hmac.compare_digest(hash_password(candidate[:200], config['salt']), config['hash'])
+    if INVITE_CODE:
+        return hmac.compare_digest(candidate, INVITE_CODE)
+    return False
+
+
+def save_registration_code(conn, code):
+    salt = secrets.token_bytes(16)
+    config = {
+        'salt': salt.hex(),
+        'hash': hash_password(code, salt).hex(),
+    }
+    conn.execute(
+        'INSERT INTO app_config (key, value) VALUES (?, ?) '
+        'ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        (REGISTRATION_CODE_CONFIG_KEY, json.dumps(config))
+    )
 
 def shared_audio_renames(conn):
     rows = conn.execute(
@@ -581,6 +624,8 @@ class Handler(SimpleHTTPRequestHandler):
             ('GET', '/api/integrations'): self.api_integrations,
             ('GET', '/api/admin/integrations'): self.api_admin_integrations,
             ('PUT', '/api/admin/integrations'): self.api_save_integrations,
+            ('GET', '/api/admin/registration-code'): self.api_admin_registration_code,
+            ('PUT', '/api/admin/registration-code'): self.api_save_registration_code,
             ('GET', '/api/youtube'): self.api_youtube,
             ('GET', '/api/apple-music/token'): self.api_apple_music_token,
             ('POST', '/api/register'): self.api_register,
@@ -1081,7 +1126,13 @@ class Handler(SimpleHTTPRequestHandler):
     def api_me(self):
         user = self.current_user()
         if not user:
-            self.send_json(401, {'error': 'Not logged in', 'inviteRequired': bool(INVITE_CODE)})
+            with db_lock, get_db() as conn:
+                enabled = registration_code_enabled(conn)
+            self.send_json(401, {
+                'error': 'Not logged in',
+                'inviteRequired': enabled,
+                'registrationConfigured': enabled,
+            })
             return
         self.send_json(200, {
             'id': user['id'],
@@ -1115,6 +1166,31 @@ class Handler(SimpleHTTPRequestHandler):
             'isAdmin': bool(row['is_admin']),
             'created': row['created']
         } for row in rows]})
+
+    def api_admin_registration_code(self):
+        if not self.require_admin():
+            return
+        with db_lock, get_db() as conn:
+            configured = read_registration_code_config(conn) is not None
+            env_configured = bool(INVITE_CODE)
+        self.send_json(200, {
+            'configured': configured or env_configured,
+            'configuredInAdmin': configured,
+            'environmentConfigured': env_configured,
+        })
+
+    def api_save_registration_code(self):
+        if not self.require_admin():
+            return
+        body = self.read_json()
+        code = str(body.get('code', '')).strip() if body else ''
+        if len(code) < 8 or len(code) > 200:
+            self.send_json(400, {'error': 'Registration code must be 8 to 200 characters.'})
+            return
+        with db_lock, get_db() as conn:
+            save_registration_code(conn, code)
+        registration_attempts.clear()
+        self.send_json(200, {'configured': True, 'configuredInAdmin': True})
 
     def api_change_password(self):
         user = self.current_user()
@@ -1291,9 +1367,31 @@ class Handler(SimpleHTTPRequestHandler):
         if password != password_confirmation:
             self.send_json(400, {'error': 'Passwords do not match.'})
             return
-        if INVITE_CODE and not hmac.compare_digest(str(body.get('invite', '')), INVITE_CODE):
-            self.send_json(403, {'error': 'Invalid invite code.'})
+        invite = str(body.get('invite', ''))
+        ip = self.client_ip()
+        now = time.time()
+        attempts = [timestamp for timestamp in registration_attempts.get(ip, [])
+                    if timestamp > now - 900]
+        if len(attempts) >= 10:
+            self.send_json(429, {'error': 'Too many registration code attempts. Try again in a few minutes.'})
             return
+        with db_lock, get_db() as conn:
+            try:
+                configured = registration_code_enabled(conn)
+                valid_code = configured and registration_code_matches(conn, invite)
+            except RuntimeError as error:
+                self.log_error('Registration code configuration failed: %s', error)
+                self.send_json(503, {'error': 'Registration is temporarily unavailable. Contact an administrator.'})
+                return
+        if not configured:
+            self.send_json(403, {'error': 'Registration is closed. Contact an administrator for access.'})
+            return
+        if not valid_code:
+            attempts.append(now)
+            registration_attempts[ip] = attempts
+            self.send_json(403, {'error': 'Invalid registration code.'})
+            return
+        registration_attempts.pop(ip, None)
         salt = secrets.token_bytes(16)
         pw_hash = hash_password(password, salt)
         with db_lock, get_db() as conn:

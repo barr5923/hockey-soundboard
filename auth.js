@@ -236,6 +236,8 @@
     const list = document.getElementById('adminUsers');
     const message = document.getElementById('adminMessage');
     const createForm = document.getElementById('adminCreateForm');
+    const registrationForm = document.getElementById('adminRegistrationForm');
+    const registrationStatus = document.getElementById('adminRegistrationStatus');
     const integrationForm = document.getElementById('adminIntegrationsForm');
     const integrationStatus = document.getElementById('adminIntegrationStatus');
     const integrationSave = document.getElementById('saveAdminIntegrations');
@@ -303,6 +305,12 @@
     });
 
     async function refresh() {
+      const registration = await call('GET', '/api/admin/registration-code');
+      registrationStatus.textContent = registration.configuredInAdmin
+        ? 'A registration code is stored securely on the server.'
+        : registration.environmentConfigured
+          ? 'The Fly.io environment currently provides a registration code. Saving one here replaces it.'
+          : 'Registration is closed until a code is saved.';
       const config = await call('GET', '/api/admin/integrations');
       providers.forEach((provider) => { fields[`${provider}Enabled`].checked = config.enabled[provider]; });
       fields.spotifyClientId.value = config.spotifyClientId;
@@ -414,6 +422,24 @@
       }
     }
 
+    registrationForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = registrationForm.querySelector('button[type="submit"]');
+      button.disabled = true;
+      try {
+        await call('PUT', '/api/admin/registration-code', {
+          code: registrationForm.code.value
+        });
+        registrationForm.reset();
+        registrationStatus.textContent = 'Registration code saved. Public account creation now requires the new code.';
+        say('Registration code updated.', true);
+      } catch (error) {
+        registrationStatus.textContent = error.message;
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     integrationForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       integrationSave.disabled = true;
@@ -487,7 +513,7 @@
     });
   }
 
-  function showLogin({ inviteRequired, resetToken }) {
+  function showLogin({ inviteRequired, registrationConfigured = inviteRequired, resetToken }) {
     return new Promise((resolve) => {
       const overlay = document.getElementById('authOverlay');
       const form = document.getElementById('authForm');
@@ -517,7 +543,7 @@
         submit.textContent = registering ? 'Create account' : mode === 'forgot' ? 'Send reset link' :
           mode === 'reset' ? 'Reset password' : 'Log in';
         toggle.textContent = registering ? 'Have an account? Log in' : 'New here? Create an account';
-        toggle.classList.toggle('hidden', !(registering || loggingIn));
+        toggle.classList.toggle('hidden', !(registering || (loggingIn && registrationConfigured)));
         forgot.classList.toggle('hidden', !loggingIn);
         back.classList.toggle('hidden', !(mode === 'forgot' || mode === 'reset'));
         setField(usernameField, registering || loggingIn, registering || loggingIn);
@@ -526,6 +552,8 @@
         setField(passwordConfirmationField, registering, registering);
         form.password.minLength = registering || mode === 'reset' ? 8 : 0;
         inviteField.classList.toggle('hidden', !(registering && inviteRequired));
+        form.invite.required = registering && inviteRequired;
+        form.invite.autocomplete = inviteRequired ? 'off' : '';
         form.password.autocomplete = registering || mode === 'reset' ? 'new-password' : 'current-password';
         form.passwordConfirmation.autocomplete = 'new-password';
         error.textContent = '';
@@ -625,7 +653,7 @@
     let first = false;
     const resetToken = new URLSearchParams(location.search).get('reset');
     if (resetToken) {
-      const result = await showLogin({ inviteRequired: false, resetToken });
+      const result = await showLogin({ inviteRequired: false, registrationConfigured: false, resetToken });
       user = result.user;
       first = Boolean(result.user.first);
     } else if (me.ok) {
@@ -633,7 +661,11 @@
       if (verificationSucceeded) user.emailVerified = true;
     } else {
       const info = await me.json().catch(() => ({}));
-      const result = await showLogin({ inviteRequired: Boolean(info.inviteRequired), resetToken: null });
+      const result = await showLogin({
+        inviteRequired: Boolean(info.inviteRequired),
+        registrationConfigured: Boolean(info.registrationConfigured ?? info.inviteRequired),
+        resetToken: null
+      });
       user = result.user;
       first = Boolean(result.user.first);
     }

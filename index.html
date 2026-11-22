@@ -6,7 +6,7 @@
     <title>Hockey Game Soundboard</title>
     <meta name="theme-color" content="#0e2d47" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=83" />
+    <link rel="stylesheet" href="styles.css?v=84" />
   </head>
   <body>
     <div class="page-shell">
@@ -546,6 +546,13 @@
           <button id="saveAdminIntegrations" class="source-button" type="submit" disabled>Save integrations</button>
           <p id="adminIntegrationStatus" role="status" aria-live="polite"></p>
         </form>
+        <form id="adminRegistrationForm" class="admin-registration" autocomplete="off">
+          <h3>Registration code</h3>
+          <p id="adminRegistrationStatus" role="status" aria-live="polite">Loading registration status...</p>
+          <label>New registration code <input name="code" type="password" required minlength="8" maxlength="200" autocomplete="new-password" placeholder="At least 8 characters" /></label>
+          <p class="admin-hint">New accounts must provide this code. Existing accounts and administrator-created accounts are unaffected. Saving a new code replaces the previous one.</p>
+          <button class="source-button" type="submit">Save registration code</button>
+        </form>
         <form id="adminCreateForm" class="admin-create" autocomplete="off">
           <h3>Create user</h3>
           <label>Username <input name="username" type="text" required minlength="3" maxlength="32" /></label>
@@ -773,7 +780,7 @@
     <script src="onedrive.js?v=2"></script>
     <script src="apple-music.js?v=4"></script>
     <script src="song-picker.js?v=2"></script>
-    <script src="auth.js?v=42"></script>
+    <script src="auth.js?v=43"></script>
     <script src="roster.js?v=11"></script>
     <script src="score-sheet.js?v=1"></script>
     <script src="game-rules.js?v=1"></script>

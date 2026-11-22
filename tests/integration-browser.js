@@ -126,6 +126,9 @@ async function runIntegrationBrowserTests() {
     assert(videos[0].durationSeconds === 70 && proxyRequests.every((url) => url.startsWith('/api/youtube?') && !url.includes('key=')), 'Playlist requests exposed the key or skipped server proxy');
     window.fetch = async (url) => {
       if (url === '/api/admin/integrations') return response(controls.config());
+      if (url === '/api/admin/registration-code') return response({
+        configured: true, configuredInAdmin: true, environmentConfigured: false
+      });
       if (url === '/api/admin/users') return response({ users: [] });
       return response({ categories: [] });
     };
