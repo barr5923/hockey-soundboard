@@ -1,5 +1,6 @@
 (function () {
   const STORAGE_KEY = 'hockey-soundboard-score-sheet-v1';
+  const HISTORY_KEY = 'hockey-soundboard-score-sheet-history-v1';
   const SHEET_WIDTH = 800;
   const SHEET_HEIGHT = 1040;
   const fields = [];
@@ -7,6 +8,7 @@
   const metadata = [];
   let savedValues = {};
   let undoSnapshot = null;
+  let history = [];
 
   function el(tag, className, text) {
     const node = document.createElement(tag);
@@ -28,13 +30,15 @@
   const heading = el('h3', '', 'Game Score Sheet');
   heading.id = 'scoreSheetHeading';
   const actions = el('div', 'score-sheet-actions');
+  const saveGame = el('button', 'source-button secondary', 'Save Game & Start New');
+  saveGame.type = 'button';
   const download = el('button', 'source-button', 'Download PDF');
   download.type = 'button';
   const reset = el('button', 'source-button secondary', 'Reset Score Sheet');
   reset.type = 'button';
   const close = el('button', 'source-button ghost', 'Close');
   close.type = 'button';
-  actions.append(download, reset, close);
+  actions.append(download, saveGame, reset, close);
   toolbar.append(heading, actions);
   const status = el('p', 'score-sheet-status');
   status.setAttribute('role', 'status');
@@ -67,6 +71,13 @@
   } catch (error) {
     reportError('The saved score sheet could not be loaded. A blank sheet is shown.', error);
   }
+  try {
+    const storedHistory = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+    history = Array.isArray(storedHistory) ? storedHistory : [];
+  } catch (error) {
+    console.error('Could not load score sheet history.', error);
+    history = [];
+  }
 
   function save() {
     const values = {};
@@ -75,6 +86,7 @@
     });
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+      window.SoundboardScoreSheet?.refresh();
       status.textContent = 'Score sheet saved on this browser.';
       status.classList.remove('is-error');
     } catch (error) {
@@ -281,8 +293,130 @@
   quickButtons.append(goalButton, saveButton, shotButton, penaltyButton, undoButton);
   quickControls.appendChild(quickButtons);
 
-  function currentPeriodColumn() {
-    return period.value === 'OT' ? 5 : Number(period.value) + 1;
+  const categoryActions = el('section', 'scorekeeper-category-actions');
+  categoryActions.append(
+    el('h3', '', 'Scorekeeper'),
+    el('p', 'scorekeeper-score', '0 - 0')
+  );
+  const categoryButtons = el('div', 'scorekeeper-category-buttons');
+  const categoryGoal = el('button', 'score-sheet-quick-button goal', 'Goal');
+  const categoryPenalty = el('button', 'score-sheet-quick-button penalty', 'Penalty');
+  const categorySave = el('button', 'score-sheet-quick-button', 'Save');
+  const categoryShot = el('button', 'score-sheet-quick-button', 'Shot');
+  const categoryEdit = el('button', 'score-sheet-quick-button undo', 'Edit Sheet');
+  const categoryHistory = el('button', 'score-sheet-quick-button undo', 'Game History');
+  const categoryUndo = el('button', 'score-sheet-quick-button undo', 'Undo');
+  [categoryGoal, categoryPenalty, categorySave, categoryShot, categoryUndo, categoryEdit, categoryHistory]
+    .forEach((button) => { button.type = 'button'; });
+  categoryButtons.append(categoryGoal, categoryPenalty, categorySave, categoryShot,
+    categoryUndo, categoryEdit, categoryHistory);
+  categoryActions.appendChild(categoryButtons);
+
+  const eventDialog = el('div', 'song-editor score-sheet-entry-editor hidden');
+  eventDialog.setAttribute('role', 'dialog');
+  eventDialog.setAttribute('aria-modal', 'true');
+  const eventCard = el('form', 'song-editor-card score-sheet-entry-card');
+  const eventHeading = el('h3', '', 'Add Goal');
+  const eventStatus = el('p', 'auth-error');
+  eventStatus.setAttribute('role', 'status');
+  const eventFields = el('div', 'editor-grid compact');
+  const eventTeam = el('select');
+  eventTeam.innerHTML = '<option value="visitor">Visitor</option><option value="home">Home</option>';
+  const eventPeriod = el('select');
+  eventPeriod.innerHTML = '<option value="1">Period 1</option><option value="2">Period 2</option><option value="3">Period 3</option><option value="OT">OT</option>';
+  const eventTime = el('input');
+  eventTime.placeholder = 'MM:SS';
+  eventTime.maxLength = 8;
+  const eventPlayer = el('input');
+  eventPlayer.placeholder = 'Player #';
+  eventPlayer.maxLength = 3;
+  const eventAssistOne = el('input');
+  eventAssistOne.placeholder = 'Assist 1';
+  eventAssistOne.maxLength = 3;
+  const eventAssistTwo = el('input');
+  eventAssistTwo.placeholder = 'Assist 2';
+  eventAssistTwo.maxLength = 3;
+  const eventStrength = el('select');
+  eventStrength.innerHTML = '<option value="">Even strength</option><option value="PP">Power play</option><option value="SH">Short-handed</option><option value="EN">Empty net</option><option value="PS">Penalty shot</option>';
+  const eventPenalty = el('input');
+  eventPenalty.placeholder = 'Penalty type';
+  eventPenalty.maxLength = 60;
+  const eventMinutes = el('select');
+  eventMinutes.innerHTML = '<option value="2">2 min</option><option value="4">4 min</option><option value="5">5 min</option><option value="10">10 min</option>';
+  const eventOff = el('input');
+  const eventStart = el('input');
+  const eventOn = el('input');
+  [eventOff, eventStart, eventOn].forEach((input) => {
+    input.placeholder = 'MM:SS';
+    input.maxLength = 8;
+  });
+  const eventSubmit = el('button', 'source-button', 'Submit');
+  eventSubmit.type = 'submit';
+  const eventCancel = el('button', 'source-button ghost', 'Cancel');
+  eventCancel.type = 'button';
+  eventCard.append(eventHeading, eventStatus, eventFields, eventSubmit, eventCancel);
+  eventDialog.appendChild(eventCard);
+  document.body.appendChild(eventDialog);
+  let eventType = 'goal';
+
+  function entryLabel(text, control) {
+    const label = el('label', 'editor-field');
+    label.append(el('span', '', text), control);
+    return label;
+  }
+
+  function closeEventDialog() {
+    eventDialog.classList.add('hidden');
+  }
+
+  function openEventDialog(type) {
+    eventType = type;
+    eventHeading.textContent = type === 'goal' ? 'Add Goal' : 'Add Penalty';
+    eventSubmit.textContent = type === 'goal' ? 'Add Goal' : 'Add Penalty';
+    eventFields.replaceChildren(
+      entryLabel('Team', eventTeam),
+      entryLabel('Period', eventPeriod),
+      entryLabel('Game time', eventTime),
+      entryLabel('Player #', eventPlayer)
+    );
+    if (type === 'goal') {
+      eventFields.append(
+        entryLabel('Assist 1', eventAssistOne),
+        entryLabel('Assist 2', eventAssistTwo),
+        entryLabel('Goal type', eventStrength)
+      );
+    } else {
+      eventFields.append(
+        entryLabel('Penalty', eventPenalty),
+        entryLabel('Minutes', eventMinutes),
+        entryLabel('Off', eventOff),
+        entryLabel('Start', eventStart),
+        entryLabel('On', eventOn)
+      );
+    }
+    eventTeam.value = team.value;
+    eventPeriod.value = period.value;
+    eventTime.value = gameTime.value;
+    eventPlayer.value = player.value;
+    eventAssistOne.value = assistOne.value;
+    eventAssistTwo.value = assistTwo.value;
+    eventPenalty.value = penaltyName.value;
+    eventMinutes.value = penaltyMinutes.value;
+    eventOff.value = eventTime.value;
+    eventStart.value = eventTime.value;
+    eventOn.value = '';
+    eventStatus.textContent = '';
+    eventDialog.classList.remove('hidden');
+    eventTime.focus();
+  }
+
+  eventCancel.addEventListener('click', closeEventDialog);
+  eventDialog.addEventListener('click', (event) => {
+    if (event.target === eventDialog) closeEventDialog();
+  });
+
+  function currentPeriodColumn(value = period.value) {
+    return value === 'OT' ? 5 : Number(value) + 1;
   }
 
   function snapshotValues() {
@@ -302,9 +436,9 @@
     return -1;
   }
 
-  function recordGoalieStat(teamKey, stat, amount = 1) {
+  function recordGoalieStat(teamKey, stat, amount = 1, periodValue = period.value) {
     const row = stat === 'shots' ? 0 : 1;
-    setNumericValue(fieldsByKey[`${teamKey}-goalies-${row}-${currentPeriodColumn()}`], amount);
+    setNumericValue(fieldsByKey[`${teamKey}-goalies-${row}-${currentPeriodColumn(periodValue)}`], amount);
     setNumericValue(fieldsByKey[`${teamKey}-goalies-${row}-6`], amount);
   }
 
@@ -320,29 +454,51 @@
     }
   }
 
-  goalButton.addEventListener('click', () => {
-    const teamKey = team.value;
+  function addGoal(teamKey, periodValue, timeValue, playerValue, assistOneValue, assistTwoValue, strengthValue = '') {
     const row = firstEmptyRow(`${teamKey}-scoring`, 13);
     if (row < 0) {
       failQuickAction(`${teamNames[teamKey]} scoring has no blank rows left.`);
-      return;
+      return false;
     }
-    if (!player.value.trim()) {
+    if (!playerValue.trim()) {
       failQuickAction('Enter the goal scorer number first.');
-      player.focus();
-      return;
+      return false;
     }
     snapshotValues();
-    fieldsByKey[`${teamKey}-scoring-${row}-0`].value = period.value;
-    fieldsByKey[`${teamKey}-scoring-${row}-1`].value = gameTime.value.trim();
-    fieldsByKey[`${teamKey}-scoring-${row}-2`].value = player.value.trim();
-    fieldsByKey[`${teamKey}-scoring-${row}-3`].value = assistOne.value.trim();
-    fieldsByKey[`${teamKey}-scoring-${row}-4`].value = assistTwo.value.trim();
+    fieldsByKey[`${teamKey}-scoring-${row}-0`].value = periodValue;
+    fieldsByKey[`${teamKey}-scoring-${row}-1`].value = timeValue;
+    fieldsByKey[`${teamKey}-scoring-${row}-2`].value = playerValue;
+    fieldsByKey[`${teamKey}-scoring-${row}-3`].value = assistOneValue;
+    fieldsByKey[`${teamKey}-scoring-${row}-4`].value = assistTwoValue;
+    fieldsByKey[`${teamKey}-scoring-${row}-5`].value = strengthValue;
     setNumericValue(fieldsByKey[`${teamKey}-score`], 1);
     const defendingTeam = teamKey === 'home' ? 'visitor' : 'home';
-    recordGoalieStat(defendingTeam, 'shots');
+    recordGoalieStat(defendingTeam, 'shots', 1, periodValue);
     finishQuickAction(`Goal added for ${teamNames[teamKey]}.`);
-  });
+    return true;
+  }
+
+  function addPenalty(teamKey, periodValue, timeValue, playerValue, penaltyValue, minutesValue,
+    offValue = timeValue, startValue = timeValue, onValue = '') {
+    const row = firstEmptyRow(`${teamKey}-penalties`, 12);
+    if (row < 0) {
+      failQuickAction(`${teamNames[teamKey]} penalties have no blank rows left.`);
+      return false;
+    }
+    snapshotValues();
+    fieldsByKey[`${teamKey}-penalties-${row}-0`].value = periodValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-1`].value = playerValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-2`].value = penaltyValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-3`].value = minutesValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-4`].value = offValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-5`].value = startValue;
+    fieldsByKey[`${teamKey}-penalties-${row}-6`].value = onValue;
+    finishQuickAction(`Penalty added for ${teamNames[teamKey]}.`);
+    return true;
+  }
+
+  goalButton.addEventListener('click', () => openEventDialog('goal'));
+  categoryGoal.addEventListener('click', () => openEventDialog('goal'));
 
   saveButton.addEventListener('click', () => {
     snapshotValues();
@@ -350,33 +506,43 @@
     recordGoalieStat(team.value, 'shots');
     finishQuickAction(`Save added for ${teamNames[team.value]}.`);
   });
+  categorySave.addEventListener('click', () => saveButton.click());
 
   shotButton.addEventListener('click', () => {
     snapshotValues();
     recordGoalieStat(team.value, 'shots');
     finishQuickAction(`Shot on ${teamNames[team.value]} added.`);
   });
+  categoryShot.addEventListener('click', () => shotButton.click());
 
-  penaltyButton.addEventListener('click', () => {
-    const teamKey = team.value;
-    const row = firstEmptyRow(`${teamKey}-penalties`, 12);
-    if (row < 0) {
-      failQuickAction(`${teamNames[teamKey]} penalties have no blank rows left.`);
+  penaltyButton.addEventListener('click', () => openEventDialog('penalty'));
+  categoryPenalty.addEventListener('click', () => openEventDialog('penalty'));
+  categoryEdit.addEventListener('click', () => document.dispatchEvent(new Event('open-game-score-sheet')));
+
+  eventCard.addEventListener('submit', (event) => {
+    event.preventDefault();
+    if (!eventPlayer.value.trim()) {
+      eventStatus.textContent = 'Enter a player number.';
+      eventPlayer.focus();
       return;
     }
-    if (!player.value.trim() || !penaltyName.value.trim()) {
-      failQuickAction('Enter a player number and penalty type first.');
-      (player.value.trim() ? penaltyName : player).focus();
-      return;
+    if (eventType === 'goal') {
+      if (addGoal(eventTeam.value, eventPeriod.value, eventTime.value.trim(),
+        eventPlayer.value.trim(), eventAssistOne.value.trim(), eventAssistTwo.value.trim(), eventStrength.value)) {
+        closeEventDialog();
+      }
+    } else {
+      if (!eventPenalty.value.trim()) {
+        eventStatus.textContent = 'Enter a penalty type.';
+        eventPenalty.focus();
+        return;
+      }
+      if (addPenalty(eventTeam.value, eventPeriod.value, eventTime.value.trim(),
+        eventPlayer.value.trim(), eventPenalty.value.trim(), eventMinutes.value,
+        eventOff.value.trim(), eventStart.value.trim(), eventOn.value.trim())) {
+        closeEventDialog();
+      }
     }
-    snapshotValues();
-    fieldsByKey[`${teamKey}-penalties-${row}-0`].value = period.value;
-    fieldsByKey[`${teamKey}-penalties-${row}-1`].value = player.value.trim();
-    fieldsByKey[`${teamKey}-penalties-${row}-2`].value = penaltyName.value.trim();
-    fieldsByKey[`${teamKey}-penalties-${row}-3`].value = penaltyMinutes.value;
-    fieldsByKey[`${teamKey}-penalties-${row}-4`].value = gameTime.value.trim();
-    fieldsByKey[`${teamKey}-penalties-${row}-5`].value = gameTime.value.trim();
-    finishQuickAction(`Penalty added for ${teamNames[teamKey]}.`);
   });
 
   undoButton.addEventListener('click', () => {
@@ -390,6 +556,101 @@
     undoSnapshot = null;
     finishQuickAction('Last quick entry undone.');
   });
+  categoryUndo.addEventListener('click', () => undoButton.click());
+
+  const historyDialog = el('div', 'song-editor score-sheet-history-editor hidden');
+  historyDialog.setAttribute('role', 'dialog');
+  const historyCard = el('div', 'song-editor-card score-sheet-history-card');
+  const historyHeading = el('h3', '', 'Saved Game Sheets');
+  const historyList = el('div', 'score-sheet-history-list');
+  const historyClose = el('button', 'source-button ghost', 'Close');
+  historyClose.type = 'button';
+  historyCard.append(historyHeading, historyList, historyClose);
+  historyDialog.appendChild(historyCard);
+  document.body.appendChild(historyDialog);
+
+  function collectValues() {
+    return Object.fromEntries(fields.map(({ key, input }) => [key, input.value]));
+  }
+
+  function renderHistory() {
+    historyList.replaceChildren();
+    if (!history.length) {
+      historyList.appendChild(el('p', '', 'No completed game sheets saved yet.'));
+      return;
+    }
+    history.slice().reverse().forEach((entry) => {
+      const row = el('div', 'score-sheet-history-row');
+      const title = `${entry.values['visitor-team'] || 'Visitor'} ${entry.values['visitor-score'] || '0'} - `
+        + `${entry.values['home-score'] || '0'} ${entry.values['home-team'] || 'Home'}`;
+      row.appendChild(el('strong', '', title));
+      row.appendChild(el('span', '', new Date(entry.savedAt).toLocaleString()));
+      const open = el('button', 'source-button secondary', 'Edit / Resume');
+      open.type = 'button';
+      open.addEventListener('click', () => {
+        if (!window.confirm('Load this saved game into the current editable score sheet? Save the current game first if needed.')) return;
+        fields.forEach(({ key, input }) => {
+          input.value = typeof entry.values[key] === 'string' ? entry.values[key] : '';
+        });
+        undoSnapshot = null;
+        save();
+        historyDialog.classList.add('hidden');
+        document.dispatchEvent(new Event('open-game-score-sheet'));
+      });
+      row.appendChild(open);
+      historyList.appendChild(row);
+    });
+  }
+
+  categoryHistory.addEventListener('click', () => {
+    renderHistory();
+    historyDialog.classList.remove('hidden');
+  });
+  historyClose.addEventListener('click', () => historyDialog.classList.add('hidden'));
+  historyDialog.addEventListener('click', (event) => {
+    if (event.target === historyDialog) historyDialog.classList.add('hidden');
+  });
+
+  saveGame.addEventListener('click', () => {
+    const values = collectValues();
+    const hasData = Object.values(values).some((value) => value.trim());
+    if (!hasData) {
+      status.textContent = 'There is no game data to save.';
+      status.classList.add('is-error');
+      return;
+    }
+    history.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, savedAt: Date.now(), values });
+    history = history.slice(-50);
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+    } catch (error) {
+      reportError('Could not save the game to history.', error);
+      return;
+    }
+    fields.forEach(({ input }) => { input.value = ''; });
+    undoSnapshot = null;
+    save();
+    status.textContent = 'Game saved to history. A blank score sheet is ready.';
+  });
+
+  function updateScoreCategory() {
+    categoryActions.querySelector('.scorekeeper-score').textContent =
+      `${teamName('visitor')} ${fieldsByKey['visitor-score'].value || 0} - `
+      + `${fieldsByKey['home-score'].value || 0} ${teamName('home')}`;
+  }
+
+  function teamName(teamKey) {
+    return fieldsByKey[`${teamKey}-team`].value.trim() || teamNames[teamKey];
+  }
+
+  window.SoundboardScoreSheet = {
+    createCategory() {
+      updateScoreCategory();
+      return categoryActions;
+    },
+    open: () => document.dispatchEvent(new Event('open-game-score-sheet')),
+    refresh: updateScoreCategory
+  };
 
   function drawText(context, text, x, y, width, size = 11, bold = false) {
     context.font = `${bold ? 'bold ' : ''}${size}px Arial`;

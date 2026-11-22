@@ -1,5 +1,5 @@
 (() => {
-  const APP_SCRIPT = 'app.js?v=121';
+  const APP_SCRIPT = 'app.js?v=122';
   const PREFIX = 'hockey-soundboard-';
   const LOCAL_ONLY_KEYS = new Set([
     'hockey-soundboard-offline-mode-v1',

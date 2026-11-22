@@ -4377,7 +4377,7 @@ function categoriesInDesktopOrder(keys) {
 }
 
 function mobileCategoryOrder() {
-  const keys = Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds');
+  const keys = [...Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds'), 'scorekeeper'];
   const desktopOrder = categoriesInDesktopOrder(keys);
   return desktopOrder.sort((a, b) =>
     (state.mobileCategorySizes[a]?.order ?? Number.MAX_SAFE_INTEGER)
@@ -4436,7 +4436,7 @@ function updateCategoryGridLayout() {
     boardElement.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
     boardElement.style.gridTemplateRows = `repeat(${rows}, minmax(80px, 1fr))`;
     boardElement.classList.toggle('game-compact', isMobileBoardLayout() || (availableHeight - CATEGORY_GRID_GAP * (rows - 1)) / rows < 180);
-    const keys = Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds');
+    const keys = [...Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds'), 'scorekeeper'];
     const order = isMobileBoardLayout() ? mobileCategoryOrder() : categoriesInDesktopOrder(keys);
     cards.map((card, index) => ({ card, index, order: order.indexOf(card.dataset.categoryKey) }))
       .sort((a, b) => (a.order < 0 ? Number.MAX_SAFE_INTEGER : a.order)
@@ -5213,8 +5213,47 @@ function renderBoard() {
     boardElement.appendChild(column);
   });
 
+  const scorekeeperKey = 'scorekeeper';
+  if (window.SoundboardScoreSheet) {
+    const scorekeeperColumn = document.createElement('section');
+    scorekeeperColumn.className = 'playlist-column scorekeeper-category';
+    scorekeeperColumn.dataset.categoryKey = scorekeeperKey;
+    const scorekeeperGrabBar = document.createElement('button');
+    scorekeeperGrabBar.type = 'button';
+    scorekeeperGrabBar.className = 'category-grab-bar';
+    scorekeeperGrabBar.setAttribute('aria-label', 'Move Scorekeeper category');
+    scorekeeperGrabBar.title = 'Drag to move scorekeeper, or use arrow keys';
+    scorekeeperGrabBar.addEventListener('pointerdown', (event) =>
+      beginCategoryCardMove(event, scorekeeperKey, scorekeeperColumn));
+    scorekeeperGrabBar.addEventListener('keydown', (event) =>
+      moveCategoryWithKeyboard(event, scorekeeperKey));
+    scorekeeperColumn.appendChild(scorekeeperGrabBar);
+    scorekeeperColumn.appendChild(window.SoundboardScoreSheet.createCategory());
+    const scorekeeperResize = document.createElement('button');
+    scorekeeperResize.type = 'button';
+    scorekeeperResize.className = 'playlist-resize-handle';
+    scorekeeperResize.setAttribute('aria-label', 'Resize Scorekeeper category');
+    scorekeeperResize.addEventListener('pointerdown', (event) =>
+      beginCategoryCardResize(event, scorekeeperKey, scorekeeperColumn));
+    scorekeeperResize.addEventListener('keydown', (event) => {
+      const current = categoryGrid.placement.get(scorekeeperKey);
+      if (!current) return;
+      let { w, h } = current;
+      if (event.key === 'ArrowRight') w += 1;
+      else if (event.key === 'ArrowLeft') w -= 1;
+      else if (event.key === 'ArrowDown') h += 1;
+      else if (event.key === 'ArrowUp') h -= 1;
+      else return;
+      event.preventDefault();
+      resizeCategoryCard(scorekeeperKey, w, h);
+    });
+    scorekeeperColumn.appendChild(scorekeeperResize);
+    boardElement.appendChild(scorekeeperColumn);
+  }
+
   updateCategoryGridLayout();
-  noVisibleCategoriesMessage.classList.toggle('hidden', visibleCategories.length > 0);
+  noVisibleCategoriesMessage.classList.toggle('hidden',
+    visibleCategories.length > 0 || Boolean(window.SoundboardScoreSheet));
   noVisibleCategoriesMessage.textContent = state.gameMode
     ? 'No categories are visible. Exit game mode to choose categories.'
     : 'All categories are hidden. Select a category above to show it.';

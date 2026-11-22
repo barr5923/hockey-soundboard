@@ -360,6 +360,10 @@ penalties directly into the corresponding rows. Goals update the selected
 team's score and the opposing goalie's shots; saves update the selected goalie's
 saves and shots. The last quick entry can be undone. On dual-screen devices, the
 entry panel uses the left screen segment while the full sheet stays on the right.
+The main board also includes a movable **Scorekeeper** category with the same
+buttons. Goal and penalty buttons open a complete entry form before submitting.
+Use **Edit Sheet** for manual corrections and **Game History** to reopen a
+previously completed sheet. **Save Game & Start New** archives up to 50 games.
 
 Use **Download PDF** to save a completed, single-page Letter-size PDF, or download
 the blank sheet as a template. PDF creation runs locally without uploading player
