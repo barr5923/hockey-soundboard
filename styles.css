@@ -885,8 +885,11 @@ h1 {
 }
 
 .score-sheet-scroll {
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 8px;
+  touch-action: pan-x pan-y pinch-zoom;
 }
 
 .score-sheet-workspace {
@@ -1057,6 +1060,44 @@ body.game-mode .scorekeeper-category-buttons {
   background: #fff;
   color: #111;
   font-family: Arial, sans-serif;
+}
+
+@media (any-pointer: coarse) and (max-width: 720px) {
+  .score-sheet-card {
+    width: calc(100vw - 16px);
+    max-width: none;
+    max-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 16px);
+    padding: max(10px, env(safe-area-inset-left));
+  }
+
+  .score-sheet-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .score-sheet-quick-controls {
+    position: static;
+    grid-column: 1;
+    grid-row: 1;
+    max-height: none;
+  }
+
+  .score-sheet-scroll {
+    grid-column: 1;
+    grid-row: 2;
+    width: 100%;
+    overflow-x: visible;
+  }
+
+  .game-score-sheet {
+    width: 800px;
+    height: 1040px;
+    transform: scale(var(--score-sheet-mobile-scale, 0.42));
+    transform-origin: top left;
+  }
+
+  .score-sheet-scroll {
+    height: calc(1040px * var(--score-sheet-mobile-scale, 0.42));
+  }
 }
 
 @media (max-width: 900px) {

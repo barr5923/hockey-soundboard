@@ -1,10 +1,10 @@
-const CACHE_NAME = 'hockey-soundboard-shell-v86';
+const CACHE_NAME = 'hockey-soundboard-shell-v87';
 const APP_SHELL = [
   './index.html',
   './how-to.html',
   './msal-redirect.html',
   './msal-redirect-bridge.js?v=1',
-  './styles.css?v=89',
+  './styles.css?v=90',
   './app.js?v=122',
   './integration-controls.js?v=4',
   './onedrive.js?v=2',

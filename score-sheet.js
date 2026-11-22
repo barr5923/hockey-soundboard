@@ -56,6 +56,17 @@
   dialog.appendChild(card);
   document.body.appendChild(dialog);
 
+  function updateMobileSheetScale() {
+    if (window.matchMedia('(any-pointer: coarse) and (max-width: 720px)').matches) {
+      const available = Math.max(260, scroll.clientWidth);
+      scroll.style.setProperty('--score-sheet-mobile-scale', String(Math.min(1, available / SHEET_WIDTH)));
+    } else {
+      scroll.style.removeProperty('--score-sheet-mobile-scale');
+    }
+  }
+  window.addEventListener('resize', updateMobileSheetScale);
+  window.visualViewport?.addEventListener('resize', updateMobileSheetScale);
+
   function reportError(message, error) {
     console.error(message, error);
     status.textContent = message;
@@ -806,6 +817,7 @@
   });
   document.addEventListener('open-game-score-sheet', () => {
     dialog.classList.remove('hidden');
+    requestAnimationFrame(updateMobileSheetScale);
     download.focus();
   });
 })();
