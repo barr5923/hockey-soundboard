@@ -4553,7 +4553,7 @@ function mobileCategoryDropTarget(categoryKey, x, y) {
 }
 
 function beginCategoryCardMove(event, categoryKey, column) {
-  if (event.button !== 0 || state.gameMode) return;
+  if (event.button !== 0) return;
   event.preventDefault();
   event.stopPropagation();
   const mobile = isMobileBoardLayout();
@@ -4602,7 +4602,7 @@ function beginCategoryCardMove(event, categoryKey, column) {
     document.removeEventListener('pointerup', finish);
     document.removeEventListener('pointercancel', finish);
     cancelAnimationFrame(scrollFrame);
-    const cancelled = finishEvent.type === 'pointercancel' || !column.isConnected || state.gameMode || mobile !== isMobileBoardLayout();
+    const cancelled = finishEvent.type === 'pointercancel' || !column.isConnected || mobile !== isMobileBoardLayout();
     state.categoryDragKey = null;
     state.categoryDragOffset = null;
     clearDropIndicators();
@@ -4620,7 +4620,7 @@ function beginCategoryCardMove(event, categoryKey, column) {
   };
   const move = (moveEvent) => {
     if (moveEvent.pointerId !== pointerId) return;
-    if (!column.isConnected || state.gameMode || mobile !== isMobileBoardLayout()) {
+    if (!column.isConnected || mobile !== isMobileBoardLayout()) {
       finish({ type: 'pointercancel', pointerId });
       return;
     }
@@ -4850,16 +4850,14 @@ function renderBoard() {
     const column = document.createElement('section');
     column.className = 'playlist-column';
     column.dataset.categoryKey = key;
-    if (!state.gameMode) {
-      const grabBar = document.createElement('button');
-      grabBar.type = 'button';
-      grabBar.className = 'category-grab-bar';
-      grabBar.setAttribute('aria-label', `Move ${formatCategoryTitle(key)} category`);
-      grabBar.title = 'Drag to move category, or use arrow keys';
-      grabBar.addEventListener('pointerdown', (event) => beginCategoryCardMove(event, key, column));
-      grabBar.addEventListener('keydown', (event) => moveCategoryWithKeyboard(event, key));
-      column.appendChild(grabBar);
-    }
+    const grabBar = document.createElement('button');
+    grabBar.type = 'button';
+    grabBar.className = 'category-grab-bar';
+    grabBar.setAttribute('aria-label', `Move ${formatCategoryTitle(key)} category`);
+    grabBar.title = 'Drag to move category, or use arrow keys';
+    grabBar.addEventListener('pointerdown', (event) => beginCategoryCardMove(event, key, column));
+    grabBar.addEventListener('keydown', (event) => moveCategoryWithKeyboard(event, key));
+    column.appendChild(grabBar);
     column.addEventListener('dragover', (event) => {
       if (!state.dragInfo || event.target.closest('.track-button')) {
         return;
@@ -4999,6 +4997,26 @@ function renderBoard() {
       savePlaylists();
       renderBoard();
       setStatus(`Reset category: ${formatCategoryTitle(key)}.`);
+    });
+
+    const shuffleButton = document.createElement('button');
+    shuffleButton.type = 'button';
+    shuffleButton.className = 'playlist-shuffle';
+    shuffleButton.setAttribute('aria-label', `Shuffle ${formatCategoryTitle(key)} category`);
+    shuffleButton.title = 'Shuffle songs in this category';
+    shuffleButton.textContent = '🔀';
+    shuffleButton.addEventListener('click', () => {
+      for (let index = tracks.length - 1; index > 0; index -= 1) {
+        const target = Math.floor(Math.random() * (index + 1));
+        [tracks[index], tracks[target]] = [tracks[target], tracks[index]];
+      }
+      state.currentTrackIndex = state.currentCategoryKey === key
+        ? tracks.indexOf(state.currentTrack)
+        : state.currentTrackIndex;
+      savePlaylists();
+      syncCurrentAutoplaySchedule();
+      renderBoard();
+      setStatus(`Shuffled category: ${formatCategoryTitle(key)}.`);
     });
 
     const deleteButton = document.createElement('button');
@@ -5158,8 +5176,10 @@ function renderBoard() {
     footerRow.className = 'playlist-footer';
     if (state.gameMode) {
       headerActions.appendChild(resetButton);
+      headerActions.appendChild(shuffleButton);
     } else {
       footerRow.appendChild(resetButton);
+      footerRow.appendChild(shuffleButton);
     }
     footerRow.appendChild(deleteButton);
 

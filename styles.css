@@ -1536,6 +1536,7 @@ body:not(.game-mode) .playlist-column {
 }
 
 .playlist-reset,
+.playlist-shuffle,
 .playlist-delete {
   border: none;
   border-radius: 10px;
@@ -1545,7 +1546,8 @@ body:not(.game-mode) .playlist-column {
   cursor: pointer;
 }
 
-.playlist-reset {
+.playlist-reset,
+.playlist-shuffle {
   background: rgba(94, 196, 255, 0.12);
   color: #dff6ff;
 }
@@ -2508,6 +2510,7 @@ body:not(.game-mode) .playlist-column {
   }
 
   .playlist-reset,
+  .playlist-shuffle,
   .playlist-delete {
     width: 36px;
     height: 36px;
@@ -2662,6 +2665,12 @@ body.game-mode .playlist-column {
   border-radius: 12px;
 }
 
+body.game-mode .category-grab-bar {
+  flex-basis: 18px;
+  height: 18px;
+  margin: -2px auto 2px;
+}
+
 body.game-mode .playlist-header {
   margin-bottom: 6px;
 }
@@ -2674,8 +2683,8 @@ body.game-mode .playlist-header-top {
 
 body.game-mode .playlist-header-actions {
   display: grid;
-  grid-template-columns: minmax(44px, 1fr) minmax(44px, 1fr) 44px;
-  gap: 2px;
+  grid-template-columns: repeat(3, minmax(44px, 1fr));
+  gap: 3px;
 }
 
 body.game-mode .playlist-header h2 {
@@ -2691,6 +2700,7 @@ body.game-mode .playlist-header h2 {
 }
 
 body.game-mode .playlist-play {
+  grid-column: 1 / -1;
   width: 100%;
   height: clamp(44px, 7vh, 64px);
   font-size: clamp(1.15rem, 4vw, 1.7rem);
@@ -2706,7 +2716,12 @@ body.game-mode .playlist-autoplay {
 }
 
 body.game-mode .playlist-reset {
-  width: 44px;
+  width: 100%;
+  height: 44px;
+}
+
+body.game-mode .playlist-shuffle {
+  width: 100%;
   height: 44px;
 }
 
