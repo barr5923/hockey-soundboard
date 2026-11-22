@@ -2474,35 +2474,6 @@ body:not(.game-mode) .playlist-column {
     border-radius: 14px;
   }
 
-  .board.board-mobile {
-    display: grid;
-  }
-
-  .board.board-mobile .category-grid-cell,
-  .board.board-mobile .category-drop-slot {
-    display: none;
-  }
-
-  .board.board-mobile .playlist-column {
-    padding: 12px;
-    border-radius: 14px;
-  }
-
-  .board.board-mobile .track-list {
-    flex: 0 1 auto;
-    gap: 8px;
-  }
-
-  .board.board-mobile .playlist-resize-handle {
-    width: 36px;
-    height: 36px;
-    bottom: 13px;
-  }
-
-  .board.board-mobile .playlist-footer {
-    padding-right: 44px;
-  }
-
   .playlist-header h2 {
     font-size: clamp(1rem, 4.6vw, 1.15rem);
     min-width: 0;
@@ -2663,6 +2634,35 @@ body.game-mode .board {
 body.game-mode .playlist-column {
   padding: clamp(6px, 1vw, 12px);
   border-radius: 12px;
+}
+
+.board.board-mobile {
+  display: grid;
+}
+
+.board.board-mobile .category-grid-cell,
+.board.board-mobile .category-drop-slot {
+  display: none;
+}
+
+.board.board-mobile .playlist-column {
+  padding: 12px;
+  border-radius: 14px;
+}
+
+.board.board-mobile .track-list {
+  flex: 0 1 auto;
+  gap: 8px;
+}
+
+.board.board-mobile .playlist-resize-handle {
+  width: 36px;
+  height: 36px;
+  bottom: 13px;
+}
+
+.board.board-mobile .playlist-footer {
+  padding-right: 44px;
 }
 
 body.game-mode .category-grab-bar {

@@ -4356,7 +4356,7 @@ function computeCategoryPlacement(keys, columns, mobile = false) {
 }
 
 const MOBILE_BOARD_QUERY = window.matchMedia('(max-width: 720px)');
-const TOUCH_DEVICE_QUERY = window.matchMedia('(pointer: coarse) and (hover: none)');
+const TOUCH_DEVICE_QUERY = window.matchMedia('(any-pointer: coarse)');
 const MOBILE_VISIBLE_SONGS = 2;
 
 function isMobileBoardLayout() {
