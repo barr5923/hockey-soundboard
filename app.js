@@ -136,6 +136,7 @@ let hornCueTimeouts = [];
 let activeHornOscillators = [];
 let activeMoodOscillators = [];
 let moodCueTimeouts = [];
+let pauseTransitionTimer = 0;
 let hornPlaying = false;
 let spotifyIframeApiRequested = false;
 let spotifyIframeApi = null;
@@ -5363,6 +5364,8 @@ function renameCategory(categoryKey, rawName) {
 }
 
 function stopAllPlayback() {
+  clearTimeout(pauseTransitionTimer);
+  pauseTransitionTimer = 0;
   markCurrentTrackPlayed();
   clearTrackPlaybackTimers();
   stopActiveCustomPlayback();
@@ -5392,20 +5395,26 @@ function togglePause() {
     state.currentTrackStartedAt = 0;
     clearTrackPlaybackTimers();
     state.autoTransitioning = false;
-    customAudio.pause();
-    activeHornAudio?.pause();
+    clearTimeout(pauseTransitionTimer);
+    rampPlaybackGain(0, 0.035);
+    pauseTransitionTimer = window.setTimeout(() => {
+      if (!state.isPaused) return;
+      customAudio.pause();
+      activeHornAudio?.pause();
+    }, 45);
     if (state.customType === 'youtube') {
       sendYouTubeCommand('pauseVideo');
     } else if (state.customType === 'spotify' && spotifyEmbedController) {
       spotifyEmbedController.pause();
     }
     hideSpotifyTapPrompt();
-    audioContext.suspend().catch(() => {});
-    rampPlaybackGain(1, 0);
     sendYouTubeVolume(100);
     syncTrackSpectrogram();
     setStatus('Playback paused. Ready when the next moment hits.');
   } else {
+    clearTimeout(pauseTransitionTimer);
+    pauseTransitionTimer = 0;
+    rampPlaybackGain(1, 0.02);
     state.currentTrackStartedAt = state.currentTrack ? performance.now() : 0;
     if (activeHornAudio?.paused) {
       activeHornAudio.play().catch(() => {});
