@@ -2,11 +2,106 @@
 
 ## Admin integration controls and shared API setup
 
+### Shared app music
+
+Open **Music library** from the side menu to browse the shared songs and add them to your own
+categories. Administrators can upload selected local audio to the app's shared
+library; spreadsheet imports upload their selected audio too. Other users can
+choose already-shared songs or store their own files in OneDrive. All signed-in users
+can access these files. Existing browser-only and OneDrive tracks remain where
+they were and are not moved automatically. Shared app audio requires internet unless
+it has been downloaded for offline use on the current device.
+
+The **Shared playlists** selector offers imported playlists to every signed-in
+user. Add a whole playlist or choose one song and a destination category; both
+retain the playlist's saved start and stop times. Existing categories are not
+replaced. Tracks without a verified uploaded audio match are not included.
+
+### Managing shared songs and templates
+
+Open **Local Song Management** from the side menu to search all shared songs,
+see category templates, or filter **To Sort** for songs not assigned to a saved
+template. Administrators can drop files or choose files to upload, edit library
+names and descriptions, and create category templates. Renaming a library song
+updates that song's name in saved shared playlists, personal boards, and the
+default board, while preserving timings and other details. Signed-in devices
+refresh names while online; offline devices receive changes after reconnecting.
+Save or discard category drafts before renaming a library song. Drag a song to a
+category or choose it from that category's **Add song** menu, then save the
+category. Editing or removing an entry changes that template only: existing
+personal board copies are not changed. Other signed-in users have read-only
+access and can add shared playlists to their boards.
+
+Song selectors can be searched by typing. Administrators can permanently delete
+a song from All songs after confirmation, but deletion is blocked while any
+saved shared category, personal board, or default board references it. Unsaved
+changes on other devices are not visible to this check. Offline downloads
+already stored on devices are not removed automatically.
+
+Category entries have their own names, descriptions, and start/stop times.
+Existing timings are preserved. A new entry starts at `00:00` and plays to the
+end of the file; the table displays the file's duration when known, or
+**Unknown** otherwise. Changing that stop field sets an explicit stop time.
+Unsaved edits are drafts, and a conflicting update requires closing and
+reopening the manager before trying again. Management and uploads require an
+internet connection.
+
+### Downloading playlists for offline use
+
+While signed in and online, add a shared playlist to your board, then open
+**Music library → Offline playlists** and select its category. The app shows how
+many songs are ready, the additional download size, and an estimate of available
+browser storage. Choose **Download for offline** and keep the app open until it
+finishes.
+Each shared song is downloaded only once per account and device, even when it
+appears in multiple categories. The original playlist and its start/stop times
+are unchanged. Other sources, such as Spotify, YouTube, and OneDrive, are not
+downloaded and may still require internet.
+
+Open the app and sign in online at least once on each device before going
+offline. The browser may clear downloaded data, especially under storage
+pressure; check that a category says **ready offline** before a game. Downloads
+remain in the browser profile after signing out. Use **Remove all downloads**
+to remove the current account's downloaded shared songs from that device without
+changing the online library. Offline edits and played status are not guaranteed
+to synchronize after reconnecting.
+
+The offline browser regression test can be run with Node.js 22 or newer and
+Edge/Chromium: `node tests/test_offline_playlists.js`. It uses a temporary local
+server, database, and browser profile. Set `SOUNDBOARD_TEST_PYTHON` or
+`SOUNDBOARD_TEST_BROWSER` if the Python or browser executable is not on the
+default path.
+
+On Fly, audio is stored alongside the database on the persistent `/data`
+volume. Back up both the database and uploads; a volume is not an independent
+backup. Uploads are limited to 60 MiB per file.
+
 Open **Admin panel** from the hamburger menu (visible only to administrators).
 In **Music integrations**, check or uncheck Spotify, YouTube, and
 Apple Music, then choose **Save integrations**. These settings apply to all
 users and are stored in the server database, separately from account settings.
 Existing integrations start enabled to preserve the prior default.
+
+### OneDrive audio storage
+
+Soundboard profiles (categories, settings, and track metadata) already sync
+between signed-in devices through the Fly.io app database. Audio files stay in
+the browser unless a user connects OneDrive and selects **Store selected audio
+in OneDrive** when adding a file. OneDrive files are saved in the app's private
+app folder; each user must connect the same Microsoft account on every device.
+Tracks stored in OneDrive need an internet connection and are not included when
+sharing a category with other soundboard users or saving a default board for
+other accounts.
+
+To enable it, register a Microsoft Entra application that supports work/school
+and personal Microsoft accounts. Add the production URL
+`https://hockey-soundboard.fly.dev/msal-redirect.html` as a
+**Single-page application** redirect URI, and add delegated Microsoft Graph permission
+`Files.ReadWrite.AppFolder`. Configure the registration's Application (client)
+ID on Fly.io as `SOUNDBOARD_ONEDRIVE_CLIENT_ID`, then deploy/restart the app.
+The client ID is public configuration, not a client secret. In the app, each
+user connects OneDrive from **Settings** and chooses the OneDrive checkbox when
+adding audio. Existing browser-local audio is not moved automatically.
 
 Below **Create user**, the compact **Existing users** table lists accounts with
 password-reset and admin-access controls. On narrow screens, scroll the table
@@ -25,11 +120,27 @@ categories, and anyone already signed in must reload to see the change.
 
 ## Phone layout
 
-On screens 720px wide or narrower, categories stack in one column in the same
-order as the desktop grid. Each song list shows two songs and scrolls for the
-rest. Header text, control buttons, and song cards scale with the screen width.
-Category drag and resize are desktop-only; the phone layout never changes saved
-desktop positions.
+On screens 720px wide or narrower, categories initially stack in desktop order.
+Drag a category by its top-center grab bar to rearrange it; on phones, other
+categories reflow around it. The grab bar also supports arrow keys. Drag the
+bottom-right handle to resize a category; categories can be as narrow
+as one-quarter of a standard column and reflow to fill the phone grid. A phone's
+saved sizes are separate from the desktop layout. Desktop categories can also
+be resized in quarter-column steps. Resize handles support arrow keys as well.
+Each phone song list shows two songs and scrolls for
+the rest.
+
+### Game mode
+
+Choose **Game mode** to focus on playback. The playback controls stay at the
+bottom of the screen with a larger centered Stop button, and category play
+buttons are enlarged. Phones show compact
+category cards with Play, Auto On/Off, and Reset; larger screens also show song
+lists when there is room.
+The layout adapts to the screen and scrolls if there are too many categories to
+fit comfortably. Choose **Exit game** to return to the normal editor and saved
+category layout. Game mode does not request browser full screen or change saved
+categories.
 
 ### Spotify on phones
 
@@ -44,7 +155,7 @@ of 30-second previews.
 Disabled providers disappear from setup/help sections, import labels, song cards,
 category choices, and CSV conversion instructions. Categories containing only
 disabled-provider songs are hidden too. Saved songs, credentials, ordering, and
-played state are not deleted; enabling the provider restores them. Local MP3s
+played state are not deleted; enabling the provider restores them. Local audio
 and built-in sounds remain available. With all providers off, online import
 controls and Playlist Conversion disappear, leaving a local-audio interface.
 Active disabled-provider playback stops without marking its song played.
@@ -183,14 +294,17 @@ required for public catalog metadata. See `how-to.html#apple-music` for setup.
 In a song's settings, choose another category under **Copy to category**, then
 select **Copy song**. This copies the saved source and timing without moving the
 original; save pending edits first. The copy starts unplayed and can be edited
-independently. Local MP3 copies share the stored audio file, which is retained
+independently. Local audio copies share the stored audio file, which is retained
 while another song still references it.
 
 YouTube songs use a hidden embedded player. Playback depends on the video's
 availability and embedding permissions; the app reports player errors and
 autoplay blocks in its status bar. If autoplay is blocked, allow autoplay for
-the site in your browser and retry, or use a local MP3. Unavailable or embedding-restricted videos need a different
-video source or a local MP3. Use localhost or the hosted site rather than opening
+the site in your browser and retry, or use a local audio file. Unavailable or
+embedding-restricted videos need a different video source or a local audio file.
+The app accepts common audio formats such as
+MP3, M4A/AAC, WAV, OGG/Opus, WebM, and FLAC; playback depends on browser support
+for the file's codec. Use localhost or the hosted site rather than opening
 the HTML file directly.
 
 Spotify clips use the selected Start/Stop times rather than the full song length.
@@ -198,11 +312,10 @@ Playback timing follows the player's position and pauses while buffering.
 The active song shows its current MM:SS position beside its source badge,
 including the clip's start offset. The timestamp remains visible while paused.
 
-**Stop** beside Pause ends music playback and cancels autoplay/crossfade timers.
+**Stop** ends music, horn and score announcements, and cancels autoplay/crossfade timers.
 Resume cannot restart a stopped song; select a song or category to play again.
 Stopping before 7 seconds leaves a song unplayed; at 7 seconds or more it is
 marked played, except repeatable songs. Time spent paused does not count.
-The separate horn control is unaffected.
 Greyed-out played songs cannot play again until reset, but their settings menu
 and drag-and-drop remain available. Moving or editing them preserves played state.
 

@@ -1,7 +1,7 @@
 (() => {
   const providers = { spotify: 'Spotify', youtube: 'YouTube', appleMusic: 'Apple Music' };
   const cacheKey = 'hs-app-integrations-v1';
-  let config = { enabled: { spotify: false, youtube: false, appleMusic: false }, spotifyClientId: '', youtubeConfigured: false };
+  let config = { enabled: { spotify: false, youtube: false, appleMusic: false }, spotifyClientId: '', youtubeConfigured: false, oneDriveClientId: '' };
   let refreshing = null;
 
   function validate(value) {
@@ -9,7 +9,11 @@
         || Object.keys(providers).some((key) => typeof value.enabled?.[key] !== 'boolean')) {
       throw new Error('The server returned invalid integration settings.');
     }
-    return { ...value, googleClientId: typeof value.googleClientId === 'string' ? value.googleClientId : '' };
+    return {
+      ...value,
+      googleClientId: typeof value.googleClientId === 'string' ? value.googleClientId : '',
+      oneDriveClientId: typeof value.oneDriveClientId === 'string' ? value.oneDriveClientId : ''
+    };
   }
 
   function names() {
@@ -77,7 +81,7 @@
         const notice = document.getElementById('integrationNotice');
         if (notice) notice.hidden = true;
       } catch (error) {
-        config = { enabled: { spotify: false, youtube: false, appleMusic: false }, spotifyClientId: '', youtubeConfigured: false };
+        config = { enabled: { spotify: false, youtube: false, appleMusic: false }, spotifyClientId: '', youtubeConfigured: false, oneDriveClientId: '' };
         syncUI();
         document.dispatchEvent(new Event('integrations-changed'));
         showError(error);

@@ -4,6 +4,8 @@ const CATEGORY_SETTINGS_KEY = 'hockey-soundboard-category-settings-v1';
 const OFFLINE_MODE_KEY = 'hockey-soundboard-offline-mode-v1';
 const HIDDEN_CATEGORIES_KEY = 'hockey-soundboard-hidden-categories-v1';
 const CATEGORY_SIZES_KEY = 'hockey-soundboard-category-grid-v2';
+const MOBILE_CATEGORY_SIZES_KEY = 'hockey-soundboard-category-grid-mobile-v1';
+const CATEGORY_WIDTH_UNITS = 4;
 const SPREADSHEET_COLUMNS = [
   'Category',
   'Song Name',
@@ -15,6 +17,33 @@ const SPREADSHEET_COLUMNS = [
 ];
 let spreadsheetLibraryPromise = null;
 let localAudioDatabasePromise = null;
+const OFFLINE_SHARED_PREFIX = 'shared-audio:';
+const offlineAudioIds = new Set();
+const offlineLocalAudioIds = new Set();
+const offlineCachedUrls = new Set();
+let offlineInventoryReady = false;
+let offlineInventoryError = '';
+let offlineInventoryPromise = null;
+let offlineShellReady = false;
+let offlineShellError = '';
+let offlineOperation = false;
+let offlineEstimate = null;
+let offlineMessage = '';
+const AUDIO_FILE_EXTENSIONS = new Set([
+  '.mp3', '.m4a', '.m4b', '.aac', '.wav', '.wave', '.ogg', '.oga', '.opus',
+  '.webm', '.flac', '.aif', '.aiff', '.aifc', '.amr', '.3gp'
+]);
+
+function isAudioFile(file) {
+  if (!file) {
+    return false;
+  }
+  if (file.type?.toLowerCase().startsWith('audio/')) {
+    return true;
+  }
+  const extension = file.name.match(/\.[^.]+$/)?.[0].toLowerCase();
+  return AUDIO_FILE_EXTENSIONS.has(extension);
+}
 
 const defaultSettings = {
   soundboardName: 'Hockey Soundboard',
@@ -23,6 +52,7 @@ const defaultSettings = {
   headerLogoUrl: 'seattle-thunderbirds-logo.svg',
   customHornDataUrl: '',
   builtInHornAudioUrl: 'sounds/Default_Horn.wav',
+  storeAudioInOneDrive: false,
   hornDefaultApplied: true,
   watermarkOpacity: 8,
   spotifyClientId: '',
@@ -114,6 +144,7 @@ let youtubeApiPlayer = null;
 let youtubeApiRequested = false;
 let youtubeApiReady = false;
 const state = {
+  gameMode: false,
   isMuted: false,
   isPaused: false,
   currentTrack: null,
@@ -141,6 +172,7 @@ const state = {
   categorySettings: loadCategorySettings(),
   hiddenCategories: loadHiddenCategories(),
   categorySizes: loadCategorySizes(),
+  mobileCategorySizes: loadCategorySizes(MOBILE_CATEGORY_SIZES_KEY),
   categoryRenameKey: null,
   playlists: loadPlaylists(),
   settings: loadSettings(),
@@ -161,8 +193,7 @@ const saveSoundboardTitleButton = document.getElementById('saveSoundboardTitle')
 const cancelSoundboardTitleButton = document.getElementById('cancelSoundboardTitle');
 const pauseToggleButton = document.getElementById('pauseToggle');
 const goalHornButton = document.getElementById('goalHorn');
-const enterFullscreenButton = document.getElementById('enterFullscreen');
-const exitFullscreenButton = document.getElementById('exitFullscreen');
+const gameModeToggleButton = document.getElementById('gameModeToggle');
 const scoreButton = document.getElementById('scoreButton');
 const scoreDialog = document.getElementById('scoreDialog');
 const scoreTeamsButton = document.getElementById('scoreTeamsButton');
@@ -198,6 +229,11 @@ const spotifyConnectionStatus = document.getElementById('spotifyConnectionStatus
 const spotifyRedirectUriInput = document.getElementById('spotifyRedirectUri');
 const localAudioInput = document.getElementById('localAudio');
 const addLocalMp3Button = document.getElementById('addLocalMp3');
+const storeAudioInOneDriveInput = document.getElementById('storeAudioInOneDrive');
+const oneDriveConnectButton = document.getElementById('oneDriveConnectButton');
+const oneDriveDisconnectButton = document.getElementById('oneDriveDisconnectButton');
+const oneDriveConnectionStatus = document.getElementById('oneDriveConnectionStatus');
+const oneDriveSetupNotice = document.getElementById('oneDriveSetupNotice');
 const useLocalMp3Input = document.getElementById('useLocalMp3');
 const offlineModeToggleInput = document.getElementById('offlineModeToggle');
 const offlineModeNotice = document.getElementById('offlineModeNotice');
@@ -232,7 +268,26 @@ const builtInSoundPicker = document.getElementById('builtinSoundPicker');
 const builtInSoundContent = document.getElementById('builtinSoundContent');
 const builtInSoundToggleButton = document.getElementById('builtinSoundToggle');
 const musicLibraryToggleButton = document.getElementById('musicLibraryToggle');
-const musicLibraryContent = document.getElementById('musicLibraryContent');
+const musicLibraryDialog = document.getElementById('musicLibraryDialog');
+const musicLibraryFeedback = document.getElementById('musicLibraryFeedback');
+const sharedAudioSelect = document.getElementById('sharedAudioSelect');
+const sharedAudioCategory = document.getElementById('sharedAudioCategory');
+const sharedAudioStatus = document.getElementById('sharedAudioStatus');
+const addSharedAudioButton = document.getElementById('addSharedAudio');
+let sharedAudioTracks = [];
+let sharedAudioLoadVersion = 0;
+const sharedPlaylistSelect = document.getElementById('sharedPlaylistSelect');
+const sharedPlaylistSong = document.getElementById('sharedPlaylistSong');
+const sharedPlaylistCategory = document.getElementById('sharedPlaylistCategory');
+const addSharedPlaylistButton = document.getElementById('addSharedPlaylist');
+const addSharedPlaylistSongButton = document.getElementById('addSharedPlaylistSong');
+const sharedPlaylistStatus = document.getElementById('sharedPlaylistStatus');
+const offlinePlaylistSelect = document.getElementById('offlinePlaylistSelect');
+const checkOfflinePlaylistButton = document.getElementById('checkOfflinePlaylist');
+const downloadOfflinePlaylistButton = document.getElementById('downloadOfflinePlaylist');
+const removeOfflineDownloadsButton = document.getElementById('removeOfflineDownloads');
+const offlinePlaylistStatus = document.getElementById('offlinePlaylistStatus');
+let selectedSharedPlaylistTracks = [];
 const newCategoryInput = document.getElementById('newCategoryName');
 const addCategoryButton = document.getElementById('addCategory');
 const playlistSpreadsheetInput = document.getElementById('playlistSpreadsheetInput');
@@ -399,9 +454,13 @@ function loadPlaylists() {
         youtubeUrl: track.youtubeUrl || '',
         audioDataUrl: typeof track.audioDataUrl === 'string' ? track.audioDataUrl : '',
         audioStorageId: typeof track.audioStorageId === 'string' ? track.audioStorageId : '',
+        oneDriveItemId: typeof track.oneDriveItemId === 'string' ? track.oneDriveItemId : '',
+        oneDriveAccountId: typeof track.oneDriveAccountId === 'string' ? track.oneDriveAccountId : '',
         audioUrl: key === 'built-in-sounds' && track.name === 'Foghorn'
           ? 'sounds/Foghorn.wav'
           : (typeof track.audioUrl === 'string' ? track.audioUrl : ''),
+        sharedAudioNameVersion: Number.isSafeInteger(track.sharedAudioNameVersion) && track.sharedAudioNameVersion > 0
+          ? track.sharedAudioNameVersion : undefined,
         builtInGroup: key === 'built-in-sounds'
           ? track.builtInGroup || builtInSoundTracks[index]?.builtInGroup || 'Reactions'
           : '',
@@ -449,9 +508,16 @@ async function saveLocalAudioFile(storageId, file) {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('mp3-files', 'readwrite');
     transaction.objectStore('mp3-files').put(file, storageId);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error('Could not store the MP3 file.'));
-    transaction.onabort = () => reject(transaction.error || new Error('Could not store the MP3 file.'));
+    transaction.oncomplete = () => {
+      if (storageId.startsWith(OFFLINE_SHARED_PREFIX)) {
+        if (window.SOUNDBOARD_USER) offlineAudioIds.add(storageId);
+      } else {
+        offlineLocalAudioIds.add(storageId);
+      }
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error || new Error('Could not store the audio file.'));
+    transaction.onabort = () => reject(transaction.error || new Error('Could not store the audio file.'));
   });
 }
 
@@ -461,7 +527,7 @@ async function loadLocalAudioFile(storageId) {
     const transaction = database.transaction('mp3-files', 'readonly');
     const request = transaction.objectStore('mp3-files').get(storageId);
     request.onsuccess = () => resolve(request.result || null);
-    request.onerror = () => reject(request.error || new Error('Could not load the stored MP3 file.'));
+    request.onerror = () => reject(request.error || new Error('Could not load the stored audio file.'));
   });
 }
 
@@ -473,25 +539,87 @@ async function deleteLocalAudioFile(storageId) {
   return new Promise((resolve, reject) => {
     const transaction = database.transaction('mp3-files', 'readwrite');
     transaction.objectStore('mp3-files').delete(storageId);
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error || new Error('Could not remove the stored MP3 file.'));
+    transaction.oncomplete = () => {
+      offlineAudioIds.delete(storageId);
+      offlineLocalAudioIds.delete(storageId);
+      resolve();
+    };
+    transaction.onerror = () => reject(transaction.error || new Error('Could not remove the stored audio file.'));
   });
 }
 
-function removeStoredAudioFile(storageId, track) {
-  if (!storageId) {
-    return;
-  }
-  if (Object.values(state.playlists).some((tracks) => tracks.some((entry) => entry !== track && entry.audioStorageId === storageId))) {
-    return;
-  }
+function sharedAudioStorageId(audioUrl) {
+  const match = typeof audioUrl === 'string' && audioUrl.match(/^\/api\/shared-audio\/([a-f0-9]{32})$/);
+  return match ? `${OFFLINE_SHARED_PREFIX}${match[1]}` : '';
+}
 
-  const objectUrl = state.localAudioObjectUrls.get(storageId);
-  state.localAudioObjectUrls.delete(storageId);
-  if (objectUrl && state.currentTrack !== track) {
-    URL.revokeObjectURL(objectUrl);
+function refreshOfflineInventory() {
+  if (offlineInventoryPromise) return offlineInventoryPromise;
+  offlineInventoryPromise = readOfflineInventory().finally(() => {
+    offlineInventoryPromise = null;
+  });
+  return offlineInventoryPromise;
+}
+
+async function readOfflineInventory() {
+  const database = await openLocalAudioDatabase();
+  const keys = await new Promise((resolve, reject) => {
+    const request = database.transaction('mp3-files', 'readonly').objectStore('mp3-files').getAllKeys();
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Could not inspect downloaded audio.'));
+  });
+  offlineAudioIds.clear();
+  offlineLocalAudioIds.clear();
+  keys.filter((key) => typeof key === 'string').forEach((key) => {
+    if (key.startsWith(OFFLINE_SHARED_PREFIX)) {
+      if (window.SOUNDBOARD_USER) offlineAudioIds.add(key);
+    } else {
+      offlineLocalAudioIds.add(key);
+    }
+  });
+  offlineCachedUrls.clear();
+  offlineShellReady = false;
+  if ('caches' in window) {
+    const urls = new Set(Object.values(state.playlists).flat()
+      .map((track) => track.audioUrl)
+      .filter((url) => url && !sharedAudioStorageId(url)));
+    await Promise.all([...urls].map(async (url) => {
+      const absolute = new URL(url, location.href);
+      if (absolute.origin === location.origin && await caches.match(absolute.href)) {
+        offlineCachedUrls.add(url);
+      }
+    }));
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      const shellUrls = ['./index.html', ...[...document.querySelectorAll('script[src], link[rel="stylesheet"]')]
+        .map((element) => element.src || element.href)
+        .filter((url) => new URL(url, location.href).origin === location.origin)];
+      const cachedShell = await Promise.all(shellUrls.map((url) => caches.match(url)));
+      offlineShellReady = cachedShell.every(Boolean);
+    }
   }
-  deleteLocalAudioFile(storageId).catch(() => {});
+  offlineInventoryReady = true;
+  offlineInventoryError = '';
+}
+
+function removeStoredAudioFile(storageId, track) {
+  if (storageId && !Object.values(state.playlists).some((tracks) => tracks.some((entry) => entry !== track && entry.audioStorageId === storageId))) {
+    const objectUrl = state.localAudioObjectUrls.get(storageId);
+    state.localAudioObjectUrls.delete(storageId);
+    if (objectUrl && state.currentTrack !== track) {
+      URL.revokeObjectURL(objectUrl);
+    }
+    deleteLocalAudioFile(storageId).catch(() => {});
+  }
+}
+
+function removeOneDriveAudioFile(itemId, accountId, track) {
+  if (!itemId || Object.values(state.playlists).some((tracks) => tracks.some((entry) => entry !== track && entry.oneDriveItemId === itemId))) {
+    return;
+  }
+  window.SoundboardOneDrive.deleteAudio(itemId, accountId).catch((error) => {
+    console.error('Could not remove the OneDrive audio file.', error);
+    setStatus(`Song deleted, but its OneDrive file could not be deleted: ${error.message}`);
+  });
 }
 
 function loadCategorySettings() {
@@ -517,25 +645,27 @@ function saveHiddenCategories() {
   localStorage.setItem(HIDDEN_CATEGORIES_KEY, JSON.stringify([...state.hiddenCategories]));
 }
 
-function loadCategorySizes() {
+function loadCategorySizes(key = CATEGORY_SIZES_KEY) {
   try {
-    const saved = JSON.parse(localStorage.getItem(CATEGORY_SIZES_KEY) || '{}');
+    const saved = JSON.parse(localStorage.getItem(key) || '{}');
     if (!saved || typeof saved !== 'object' || Array.isArray(saved)) {
       return {};
     }
     return Object.fromEntries(Object.entries(saved).filter(([, size]) => size && typeof size === 'object').map(([key, size]) => [key, {
-      w: Math.max(1, Math.min(2, Math.round(Number(size.w)) || 1)),
+      w: Math.max(1 / CATEGORY_WIDTH_UNITS, Math.min(2, Math.round((Number(size.w) || 1) * CATEGORY_WIDTH_UNITS) / CATEGORY_WIDTH_UNITS)),
       h: Math.max(3, Math.min(10, Math.round(Number(size.h)) || 4)),
-      col: Number.isInteger(size.col) && size.col >= 0 ? size.col : undefined,
-      row: Number.isInteger(size.row) && size.row >= 0 ? size.row : undefined
+      col: Number.isFinite(size.col) && size.col >= 0 ? Math.round(size.col * CATEGORY_WIDTH_UNITS) / CATEGORY_WIDTH_UNITS : undefined,
+      row: Number.isInteger(size.row) && size.row >= 0 ? size.row : undefined,
+      order: Number.isInteger(size.order) && size.order >= 0 ? size.order : undefined
     }]));
   } catch (error) {
     return {};
   }
 }
 
-function saveCategorySizes() {
-  localStorage.setItem(CATEGORY_SIZES_KEY, JSON.stringify(state.categorySizes));
+function saveCategorySizes(mobile = false) {
+  localStorage.setItem(mobile ? MOBILE_CATEGORY_SIZES_KEY : CATEGORY_SIZES_KEY,
+    JSON.stringify(mobile ? state.mobileCategorySizes : state.categorySizes));
 }
 
 function getCategorySettings(categoryKey) {
@@ -605,7 +735,7 @@ function getNextUnplayedTrack(categoryKey, currentTrack) {
 
 function getTrackDurationSeconds(track) {
   const start = Math.max(0, Number(track.startTime) || 0);
-  const audioDuration = (track.audioDataUrl || track.audioStorageId || track.audioUrl) && track === state.currentTrack && Number.isFinite(customAudio.duration) ? customAudio.duration : 0;
+  const audioDuration = (track.audioDataUrl || track.audioStorageId || track.oneDriveItemId || track.audioUrl) && track === state.currentTrack && Number.isFinite(customAudio.duration) ? customAudio.duration : 0;
   const stop = Number(track.stopTime) || Number(track.durationSeconds) || audioDuration;
   return stop > start ? stop - start : 0;
 }
@@ -637,7 +767,7 @@ function getTrackCardDurationSeconds(track) {
     foghorn: 3,
     custom: 0.28
   };
-  if (!track.audioDataUrl && !track.audioStorageId && !track.audioUrl && !track.spotifyUrl && !track.youtubeUrl && !track.youtubeEmbedUrl && !track.appleMusicUrl) {
+  if (!track.audioDataUrl && !track.audioStorageId && !track.oneDriveItemId && !track.audioUrl && !track.spotifyUrl && !track.youtubeUrl && !track.youtubeEmbedUrl && !track.appleMusicUrl) {
     return Math.ceil(builtInCueDurations[track.mood] || builtInCueDurations.neutral);
   }
   return null;
@@ -737,12 +867,12 @@ function ensureYouTubeApi() {
             150: 'The video owner does not allow playback in embedded players.',
             153: 'YouTube rejected the player identification. Open the app through localhost or its hosted website and check browser referrer restrictions.'
           };
-          setStatus(`${state.currentTrack.name}: ${messages[event.data] || `YouTube playback failed (error ${event.data}).`} Try another video or a local MP3.`);
+          setStatus(`${state.currentTrack.name}: ${messages[event.data] || `YouTube playback failed (error ${event.data}).`} Try another video or a local audio file.`);
         },
         onAutoplayBlocked: () => {
           if (state.customType === 'youtube') {
             clearTrackPlaybackTimers();
-            setStatus('YouTube autoplay was blocked. Allow autoplay for this site in your browser, then retry the song, or use a local MP3.');
+            setStatus('YouTube autoplay was blocked. Allow autoplay for this site in your browser, then retry the song, or use a local audio file.');
           }
         },
         onStateChange: (event) => {
@@ -888,13 +1018,23 @@ function startCategoryTrack(categoryKey, index, track, fadeInSeconds = 0) {
     setStatus('Apple Music songs are metadata and links only. Use Open in Apple Music; soundboard playback is not supported yet.');
     return;
   }
-  if (isOfflineModeActive() && !(track.audioDataUrl || track.audioStorageId || track.audioUrl) && (track.spotifyUrl || track.youtubeUrl || track.youtubeEmbedUrl)) {
-    setStatus('This online track needs internet. Use a local MP3 for offline playback.');
+  if (isOfflineModeActive() && !isTrackAvailableOffline(track)) {
+    setStatus('This track needs an internet connection. Use a locally stored audio file for offline playback.');
     return;
   }
 
   if (state.currentTrack && state.currentTrack !== track) {
     markCurrentTrackPlayed();
+  }
+
+  // Resume during the Play gesture, before a stored audio source loads asynchronously.
+  if (audioContext.state !== 'running') {
+    audioContext.resume().catch((error) => {
+      console.warn('Could not start the soundboard audio output:', error);
+      if (state.currentTrack === track && !state.isPaused) {
+        setStatus('Could not start audio output. Try Play again.');
+      }
+    });
   }
 
   clearTrackPlaybackTimers();
@@ -916,8 +1056,10 @@ function startCategoryTrack(categoryKey, index, track, fadeInSeconds = 0) {
   const now = audioContext.currentTime;
   playbackGain.gain.cancelScheduledValues(now);
   playbackGain.gain.setValueAtTime(fadeInSeconds > 0 ? 0 : 1, now);
-  const isSpotifyTrack = Boolean(getSpotifyTrackUri(track)) && !track.audioDataUrl && !track.audioStorageId && !track.audioUrl && !track.youtubeEmbedUrl;
-  const isStoredMp3Loading = Boolean(track.audioStorageId && !track.audioDataUrl && !state.localAudioObjectUrls.has(track.audioStorageId));
+  const isSpotifyTrack = Boolean(getSpotifyTrackUri(track)) && !track.audioDataUrl && !track.audioStorageId && !track.oneDriveItemId && !track.audioUrl && !track.youtubeEmbedUrl;
+  const cachedSharedId = sharedAudioStorageId(track.audioUrl);
+  const storedId = track.audioStorageId || (offlineAudioIds.has(cachedSharedId) ? cachedSharedId : '') || track.oneDriveItemId;
+  const isStoredMp3Loading = Boolean(storedId && !track.audioDataUrl && !state.localAudioObjectUrls.has(storedId));
   if (!isSpotifyTrack && !isStoredMp3Loading) {
     schedulePlayedThreshold();
   }
@@ -1075,6 +1217,7 @@ function loadSettings() {
       spotifyRedirectUri: typeof parsed.spotifyRedirectUri === 'string' ? parsed.spotifyRedirectUri : '',
       spotifyAccessToken: typeof parsed.spotifyAccessToken === 'string' ? parsed.spotifyAccessToken : '',
       youtubeApiKey: typeof parsed.youtubeApiKey === 'string' ? parsed.youtubeApiKey : '',
+      storeAudioInOneDrive: parsed.storeAudioInOneDrive === true,
       scoreVoiceName: typeof parsed.scoreVoiceName === 'string' ? parsed.scoreVoiceName : '',
       scoreHomeTeamName: typeof parsed.scoreHomeTeamName === 'string' && parsed.scoreHomeTeamName.trim()
         ? parsed.scoreHomeTeamName.trim()
@@ -1109,6 +1252,7 @@ function applyBrandSettings() {
     spotifyRedirectUri: state.settings.spotifyRedirectUri || '',
     spotifyAccessToken: state.settings.spotifyAccessToken || '',
     youtubeApiKey: state.settings.youtubeApiKey || '',
+    storeAudioInOneDrive: storeAudioInOneDriveInput.checked,
     scoreVoiceName: state.settings.scoreVoiceName || '',
     scoreHomeTeamName: scoreHomeTeamNameInput.value.trim() || defaultSettings.scoreHomeTeamName,
     scoreAwayTeamName: scoreAwayTeamNameInput.value.trim() || defaultSettings.scoreAwayTeamName,
@@ -1852,7 +1996,7 @@ function parseSpreadsheetTime(value, label, rowNumber) {
   throw new Error(`${label} on row ${rowNumber} must be MM:SS or seconds.`);
 }
 
-async function importSpreadsheetFile(file, localMp3Files = []) {
+async function importSpreadsheetFile(file, localAudioFiles = []) {
   const XLSX = await loadSpreadsheetLibrary();
   const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
   const worksheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -1876,13 +2020,13 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
     return '';
   };
   const hasSongName = ['song name', 'name', 'title'].some((name) => headerIndexes.has(name));
-  const hasSourceColumn = ['source', 'url', 'spotify url', 'youtube url', 'apple music url', 'mp3 data url'].some((name) => headerIndexes.has(name));
+  const hasSourceColumn = ['source', 'url', 'spotify url', 'youtube url', 'apple music url', 'mp3 data url', 'audio data url'].some((name) => headerIndexes.has(name));
   if (!hasSongName || !hasSourceColumn) {
     throw new Error('The first sheet must include Song Name and source URL columns. Download the example workbook for the expected columns.');
   }
 
   const additions = new Map();
-  const localFilesByName = new Map(localMp3Files.map((mp3File) => [mp3File.name.toLowerCase(), mp3File]));
+  const localFilesByName = new Map(localAudioFiles.map((audioFile) => [audioFile.name.toLowerCase(), audioFile]));
   let importedRows = 0;
   let importedTracks = 0;
   const addTrack = (categoryKey, track) => {
@@ -1913,12 +2057,12 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
     let spotifyUrl = String(getCell(row, 'Spotify URL', 'Spotify') ?? '').trim();
     let youtubeUrl = String(getCell(row, 'YouTube URL', 'Youtube URL', 'YouTube') ?? '').trim();
     let appleMusicUrl = String(getCell(row, 'Apple Music URL', 'Apple Music') ?? '').trim();
-    let audioDataUrl = String(getCell(row, 'MP3 Data URL', 'Audio Data URL') ?? '').trim();
+    let audioDataUrl = String(getCell(row, 'Audio Data URL', 'MP3 Data URL') ?? '').trim();
     const rowProvider = spotifyUrl ? 'spotify' : youtubeUrl ? 'youtube' : appleMusicUrl ? 'appleMusic' : getUrlIntegration(sourceValue);
     if (rowProvider && !window.SoundboardIntegrations.enabled(rowProvider)) {
       throw new Error(`The music source on row ${rowNumber} is disabled by the administrator.`);
     }
-    let localMp3File = null;
+    let localAudioFile = null;
     if (sourceValue) {
       if (spotifyUrl || youtubeUrl || appleMusicUrl || audioDataUrl) {
         throw new Error(`Use either the Source column or legacy source columns on row ${rowNumber}, not both.`);
@@ -1936,15 +2080,15 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
         const fileName = normalizedPath.split('/').pop().toLowerCase();
         const localFile = localFilesByName.get(fileName);
         if (!localFile) {
-          throw new Error(`MP3 file "${fileName}" on row ${rowNumber} was not selected. Choose the matching file above before importing.`);
+          throw new Error(`Audio file "${fileName}" on row ${rowNumber} was not selected. Choose the matching file above before importing.`);
         }
-        if (!localFile.name.toLowerCase().endsWith('.mp3') && !localFile.type.includes('mpeg')) {
-          throw new Error(`Source on row ${rowNumber} matched "${localFile.name}", which is not an MP3 file.`);
+        if (!isAudioFile(localFile)) {
+          throw new Error(`Source on row ${rowNumber} matched "${localFile.name}", which is not an audio file.`);
         }
-        localMp3File = localFile;
+        localAudioFile = localFile;
       }
     }
-    const sourceCount = [spotifyUrl, youtubeUrl, appleMusicUrl, audioDataUrl, localMp3File].filter(Boolean).length;
+    const sourceCount = [spotifyUrl, youtubeUrl, appleMusicUrl, audioDataUrl, localAudioFile].filter(Boolean).length;
 
     if (sourceCount > 1) {
       throw new Error(`Use only one source per song on row ${rowNumber}.`);
@@ -1953,7 +2097,7 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
       throw new Error(`Stop Time on row ${rowNumber} must be later than Start Time.`);
     }
     if (audioDataUrl && !/^data:audio\//i.test(audioDataUrl)) {
-      throw new Error(`MP3 Data URL on row ${rowNumber} must be an audio data URL.`);
+      throw new Error(`Audio Data URL on row ${rowNumber} must be an audio data URL.`);
     }
 
     const makeTrack = (source = {}) => {
@@ -2035,10 +2179,10 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
       }
     } else if (audioDataUrl) {
       addTrack(categoryKey, makeTrack({ audioDataUrl }));
-    } else if (localMp3File) {
-      const localName = localMp3File.name.replace(/\.mp3$/i, '').trim() || 'Local MP3';
-      const track = makeTrack({ name: localName, description: 'Local MP3' });
-      Object.defineProperty(track, 'pendingAudioFile', { value: localMp3File, configurable: true });
+    } else if (localAudioFile) {
+      const localName = localAudioFile.name.replace(/\.[^.]+$/, '').trim() || 'Local audio';
+      const track = makeTrack({ name: localName, description: 'Local audio' });
+      Object.defineProperty(track, 'pendingAudioFile', { value: localAudioFile, configurable: true });
       addTrack(categoryKey, track);
     } else {
       if (!name) {
@@ -2058,23 +2202,20 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
     }
   }
 
-  const storedAudioFiles = [];
+  let uploadedAudioCount = 0;
   try {
     for (const tracks of additions.values()) {
       for (const track of tracks) {
         if (!track.pendingAudioFile) {
           continue;
         }
-        const storageId = createLocalAudioStorageId();
-        await saveLocalAudioFile(storageId, track.pendingAudioFile);
-        storedAudioFiles.push({ storageId, file: track.pendingAudioFile });
-        track.audioStorageId = storageId;
+        track.audioUrl = await uploadSharedAudio(track.pendingAudioFile);
+        uploadedAudioCount += 1;
         delete track.pendingAudioFile;
       }
     }
   } catch (error) {
-    await Promise.all(storedAudioFiles.map(({ storageId }) => deleteLocalAudioFile(storageId).catch(() => {})));
-    throw new Error('Unable to store one or more MP3 files in browser storage.');
+    throw new Error(`${error.message || 'Unable to upload audio.'} ${uploadedAudioCount} uploaded file(s) remain in the shared library.`);
   }
 
   const previousPlaylists = state.playlists;
@@ -2087,12 +2228,9 @@ async function importSpreadsheetFile(file, localMp3Files = []) {
     savePlaylists();
   } catch (error) {
     state.playlists = previousPlaylists;
-    await Promise.all(storedAudioFiles.map(({ storageId }) => deleteLocalAudioFile(storageId).catch(() => {})));
-    throw new Error('Unable to save imported songs. The spreadsheet may exceed browser storage limits.');
+    throw new Error(`Unable to save imported songs. ${uploadedAudioCount} uploaded file(s) remain in the shared library.`);
   }
-  storedAudioFiles.forEach(({ storageId, file }) => {
-    state.localAudioObjectUrls.set(storageId, URL.createObjectURL(file));
-  });
+  if (uploadedAudioCount) loadSharedAudio();
   renderBoard();
   return { rows: importedRows, tracks: importedTracks, categories: additions.size };
 }
@@ -2129,12 +2267,12 @@ async function downloadSpreadsheetExample() {
     const instructionsSheet = XLSX.utils.aoa_to_sheet([
       ['Hockey Soundboard spreadsheet'],
       ['Use one song per row on the Tracks sheet.'],
-      [`Source auto-detects enabled music-service URLs (${window.SoundboardIntegrations.names().join(', ') || 'none'}), MP3 data URLs, or local MP3 filenames/paths.`],
+      [`Source auto-detects enabled music-service URLs (${window.SoundboardIntegrations.names().join(', ') || 'none'}), audio data URLs, or local audio filenames/paths.`],
       ['Mood is optional and defaults to custom. Built-in fallback moods include celebration, concern, neutral, upbeat, defensive, and playful.'],
       ['Start Time and Stop Time accept MM:SS text or seconds. Stop Time must be later than Start Time.'],
       ['Leave Category blank to import into Uncategorized. Played state is managed by the app and is not included.'],
       ['Enabled service playlists expand into individual songs. Shared API credentials are configured by the administrator. Some sources support external links only.'],
-      ['Duration is not required; playback uses source metadata. For MP3 filenames/paths, select the matching MP3 files in the app before importing.']
+      ['Duration is not required; playback uses source metadata. For audio filenames/paths, select the matching audio files in the app before importing. Playback depends on browser format support.']
     ]);
     instructionsSheet['!cols'] = [{ wch: 120 }];
     XLSX.utils.book_append_sheet(workbook, tracksSheet, 'Tracks');
@@ -2146,7 +2284,7 @@ async function downloadSpreadsheetExample() {
   }
 }
 
-const SHARE_FIELDS = ['name', 'description', 'mood', 'startTime', 'stopTime', 'durationSeconds', 'spotifyUrl', 'youtubeUrl', 'youtubeEmbedUrl', 'appleMusicUrl', 'audioDataUrl'];
+const SHARE_FIELDS = ['name', 'description', 'mood', 'startTime', 'stopTime', 'durationSeconds', 'spotifyUrl', 'youtubeUrl', 'youtubeEmbedUrl', 'appleMusicUrl', 'audioDataUrl', 'audioUrl', 'repeatable', 'sharedAudioNameVersion'];
 
 function sharableCategoryKeys() {
   return Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds' && isCategoryIntegrationVisible(key));
@@ -2175,11 +2313,25 @@ async function refreshSharedCategories() {
     sharedCategories = (await sharedApi('GET', '/api/shared-categories')).categories || [];
   } catch (error) {
     sharedCategories = [];
+    sharedPlaylistStatus.textContent = error.message || 'Could not load shared playlists.';
   }
   renderCategorySharing();
 }
 
 function renderCategorySharing() {
+  const previousPlaylist = sharedPlaylistSelect.value;
+  const importedPlaylists = sharedCategories.filter((category) => category.managed);
+  sharedPlaylistSelect.replaceChildren(new Option('Choose a playlist', ''));
+  importedPlaylists.forEach((category) => {
+    sharedPlaylistSelect.add(new Option(`${category.name} (${category.trackCount} songs)`, String(category.id)));
+  });
+  sharedPlaylistSelect.value = importedPlaylists.some((category) => String(category.id) === previousPlaylist) ? previousPlaylist : '';
+  if (!sharedPlaylistSelect.value) {
+    selectedSharedPlaylistTracks = [];
+    sharedPlaylistSong.replaceChildren(new Option('Choose a song', ''));
+    addSharedPlaylistButton.disabled = true;
+    addSharedPlaylistSongButton.disabled = true;
+  }
   const keys = sharableCategoryKeys();
   const previous = shareCategorySelect.value;
   shareCategorySelect.innerHTML = '';
@@ -2205,7 +2357,7 @@ function renderCategorySharing() {
   exportCategoryCsvButton.disabled = !hasSelection;
 
   sharedCategoryList.innerHTML = '';
-  const others = sharedCategories.filter((category) => !category.mine);
+  const others = sharedCategories.filter((category) => !category.mine && !category.managed);
   if (!others.length) {
     const empty = document.createElement('p');
     empty.className = 'spreadsheet-note';
@@ -2251,7 +2403,7 @@ async function shareSelectedCategory() {
       tracks: buildSharableTracks(key)
     });
     await refreshSharedCategories();
-    const skipped = result.skipped ? ` ${result.skipped} songs were left out because they use MP3 files stored only in this browser.` : '';
+    const skipped = result.skipped ? ` ${result.skipped} songs were left out because they use private audio files that cannot be shared.` : '';
     setStatus(`Shared ${formatCategoryTitle(key)} with ${result.shared} songs.${skipped}`);
   } catch (error) {
     setStatus(error.message || 'Could not share the category.');
@@ -2293,10 +2445,11 @@ async function addSharedCategory(category, button, asPrivate = false) {
       youtubeEmbedUrl: track.youtubeEmbedUrl || '',
       audioDataUrl: track.audioDataUrl || '',
       audioStorageId: '',
-      audioUrl: '',
+      audioUrl: track.audioUrl || '',
+      sharedAudioNameVersion: track.sharedAudioNameVersion,
       builtInGroup: '',
       played: false,
-      repeatable: false
+      repeatable: Boolean(track.repeatable)
     }));
     if (asPrivate) {
       state.hiddenCategories.add(key);
@@ -2312,6 +2465,59 @@ async function addSharedCategory(category, button, asPrivate = false) {
   } finally {
     button.disabled = false;
   }
+}
+
+async function loadSelectedSharedPlaylist() {
+  const id = sharedPlaylistSelect.value;
+  selectedSharedPlaylistTracks = [];
+  sharedPlaylistSong.replaceChildren(new Option('Choose a song', ''));
+  addSharedPlaylistButton.disabled = true;
+  addSharedPlaylistSongButton.disabled = true;
+  if (!id) {
+    sharedPlaylistStatus.textContent = 'Choose a playlist to see its songs.';
+    return;
+  }
+  sharedPlaylistStatus.textContent = 'Loading playlist...';
+  try {
+    const detail = await sharedApi('GET', `/api/shared-category?id=${encodeURIComponent(id)}`);
+    if (sharedPlaylistSelect.value !== id) return;
+    selectedSharedPlaylistTracks = detail.tracks;
+    selectedSharedPlaylistTracks.forEach((track, index) => {
+      sharedPlaylistSong.add(new Option(track.name, String(index)));
+    });
+    addSharedPlaylistButton.disabled = false;
+    sharedPlaylistStatus.textContent = `${selectedSharedPlaylistTracks.length} songs with their saved start and stop times.`;
+  } catch (error) {
+    if (sharedPlaylistSelect.value === id) sharedPlaylistStatus.textContent = error.message || 'Could not load this playlist.';
+  }
+}
+
+function addSelectedSharedPlaylist() {
+  const category = sharedCategories.find((entry) => String(entry.id) === sharedPlaylistSelect.value);
+  if (category) addSharedCategory(category, addSharedPlaylistButton, false);
+}
+
+function addSelectedSharedPlaylistSong() {
+  const selected = sharedPlaylistSong.value;
+  const track = selected === '' ? null : selectedSharedPlaylistTracks[Number(selected)];
+  if (!track) {
+    setStatus('Choose a song from the shared playlist.');
+    return;
+  }
+  const key = getImportCategoryKey(sharedPlaylistCategory);
+  const createdCategory = !state.playlists[key];
+  ensureImportCategory(key);
+  state.playlists[key].push({ ...track, played: false });
+  try {
+    savePlaylists();
+  } catch (error) {
+    state.playlists[key].pop();
+    if (createdCategory) delete state.playlists[key];
+    setStatus('Could not save this song to your board.');
+    return;
+  }
+  renderBoard();
+  setStatus(`Added "${track.name}" to ${formatCategoryTitle(key)} with its playlist timing.`);
 }
 
 function buildExportRows(key, useSeconds) {
@@ -2349,7 +2555,7 @@ function downloadBlob(blob, fileName) {
 }
 
 function exportSkippedNote(skipped) {
-  return skipped ? ` ${skipped} songs were left out because they use MP3 files stored only in this browser.` : '';
+  return skipped ? ` ${skipped} songs were left out because they use private audio files that cannot be shared.` : '';
 }
 
 function exportCategoryCsv() {
@@ -2388,7 +2594,84 @@ shareCategoryButton.addEventListener('click', shareSelectedCategory);
 unshareCategoryButton.addEventListener('click', unshareSelectedCategory);
 exportCategoryExcelButton.addEventListener('click', exportCategoryExcel);
 exportCategoryCsvButton.addEventListener('click', exportCategoryCsv);
+document.addEventListener('managed-playlists-changed', () => {
+  refreshSharedCategories();
+  if (!musicLibraryDialog.classList.contains('hidden')) loadSharedAudio();
+});
 refreshSharedCategories();
+
+function applySharedAudioNameChanges(renames) {
+  const byUrl = new Map(renames.map((rename) => [`/api/shared-audio/${rename.id}`, rename]));
+  let boardChanged = false;
+  const renameTrack = (track) => {
+    const rename = byUrl.get(track.audioUrl);
+    if (!rename || !Number.isSafeInteger(rename.version) || rename.version <= (track.sharedAudioNameVersion || 0)) return false;
+    if (state.songEditor.categoryKey !== null &&
+        state.playlists[state.songEditor.categoryKey]?.[state.songEditor.index] === track) {
+      if (editSongNameInput.value === track.name) editSongNameInput.value = rename.name;
+      else setStatus('This song was renamed in the shared library. Review your unsaved song name.');
+    }
+    track.name = rename.name;
+    track.sharedAudioNameVersion = rename.version;
+    return true;
+  };
+  Object.values(state.playlists).forEach((tracks) => {
+    tracks.forEach((track) => { if (renameTrack(track)) boardChanged = true; });
+  });
+  selectedSharedPlaylistTracks.forEach((track, index) => {
+    if (renameTrack(track) && sharedPlaylistSong.options[index + 1]) {
+      sharedPlaylistSong.options[index + 1].textContent = track.name;
+    }
+  });
+  sharedAudioTracks.forEach((track) => {
+    const rename = byUrl.get(track.url);
+    if (rename && Number.isSafeInteger(rename.version) && rename.version > (track.nameVersion || 0)) {
+      track.name = rename.name;
+      track.nameVersion = rename.version;
+      const option = [...sharedAudioSelect.options].find((item) => item.value === track.id);
+      if (option) option.textContent = track.category ? `${track.category} - ${track.name}` : track.name;
+    }
+  });
+  if (boardChanged) {
+    try {
+      savePlaylists();
+    } catch (error) {
+      console.error('Could not save updated shared song names.', error);
+      setStatus('Shared song names updated, but could not be saved on this device.');
+    }
+    renderBoard();
+  }
+}
+
+document.addEventListener('shared-audio-renamed', (event) => {
+  applySharedAudioNameChanges([event.detail]);
+});
+
+let sharedAudioRenameRefresh = null;
+async function refreshSharedAudioNames() {
+  if (sharedAudioRenameRefresh || !window.SOUNDBOARD_USER || !navigator.onLine || isOfflineModeActive()) return;
+  sharedAudioRenameRefresh = (async () => {
+    try {
+      const response = await fetch('/api/shared-audio-renames', { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) throw new Error(`Name refresh failed (${response.status}).`);
+      const result = await response.json();
+      if (!Array.isArray(result.renames)) throw new Error('Invalid shared song name response.');
+      applySharedAudioNameChanges(result.renames);
+      document.dispatchEvent(new CustomEvent('shared-audio-names-refreshed', { detail: result.renames }));
+    } catch (error) {
+      console.warn('Could not refresh shared song names:', error);
+    } finally {
+      sharedAudioRenameRefresh = null;
+    }
+  })();
+  await sharedAudioRenameRefresh;
+}
+window.addEventListener('online', refreshSharedAudioNames);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshSharedAudioNames();
+});
+setInterval(refreshSharedAudioNames, 30000);
+refreshSharedAudioNames();
 
 function handleLogoFileSelection(event) {  const file = event.target.files?.[0];
   if (!file) {
@@ -2449,11 +2732,58 @@ function handleHornFileSelection(event) {
   reader.readAsDataURL(file);
 }
 
+async function updateOneDriveConnectionUi() {
+  const configured = Boolean(window.SoundboardIntegrations.config().oneDriveClientId);
+  oneDriveSetupNotice.hidden = configured;
+  oneDriveConnectButton.disabled = !configured;
+  let account = null;
+  try {
+    if (configured) {
+      account = await window.SoundboardOneDrive.getAccountInfo();
+    }
+    oneDriveConnectionStatus.textContent = account ? 'Connected to OneDrive.' : 'Not connected.';
+  } catch (error) {
+    oneDriveConnectionStatus.textContent = error.message || 'Could not check the OneDrive connection.';
+  }
+  oneDriveDisconnectButton.disabled = !account;
+  storeAudioInOneDriveInput.disabled = !account;
+}
+
+async function connectOneDrive() {
+  oneDriveConnectButton.disabled = true;
+  oneDriveConnectionStatus.textContent = 'Connecting to OneDrive...';
+  try {
+    await window.SoundboardOneDrive.connect();
+    await updateOneDriveConnectionUi();
+    setStatus('Connected to OneDrive. New audio can now be stored in your OneDrive app folder.');
+  } catch (error) {
+    oneDriveConnectionStatus.textContent = error.message || 'Could not connect to OneDrive.';
+  } finally {
+    oneDriveConnectButton.disabled = !window.SoundboardIntegrations.config().oneDriveClientId;
+  }
+}
+
+async function disconnectOneDrive() {
+  oneDriveDisconnectButton.disabled = true;
+  try {
+    await window.SoundboardOneDrive.disconnect();
+    storeAudioInOneDriveInput.checked = false;
+    state.settings.storeAudioInOneDrive = false;
+    saveSettings();
+    await updateOneDriveConnectionUi();
+    setStatus('Disconnected from OneDrive. Existing OneDrive audio needs a reconnection to play.');
+  } catch (error) {
+    oneDriveConnectionStatus.textContent = error.message || 'Could not disconnect OneDrive.';
+    oneDriveDisconnectButton.disabled = false;
+  }
+}
+
 function toggleSettingsPanel() {
   const isOpening = settingsPanel.classList.contains('hidden');
   settingsPanel.classList.toggle('hidden', !isOpening);
   settingsToggleButton.setAttribute('aria-expanded', String(isOpening));
   if (isOpening) {
+    updateOneDriveConnectionUi();
     document.getElementById('closeSettings').focus();
   } else {
     document.querySelector('.side-menu-toggle').focus();
@@ -2466,43 +2796,299 @@ function closeSettingsPanel() {
   }
 }
 
-function syncFullscreenButtons() {
-  const isFullscreen = Boolean(document.fullscreenElement);
-  enterFullscreenButton.hidden = isFullscreen;
-  exitFullscreenButton.hidden = !isFullscreen;
-}
-
-async function enterFullscreen() {
-  if (!document.fullscreenEnabled || !document.documentElement.requestFullscreen) {
-    setStatus('Full screen is not available in this browser.');
-    return;
+function toggleGameMode() {
+  state.gameMode = !state.gameMode;
+  document.body.classList.toggle('game-mode', state.gameMode);
+  gameModeToggleButton.setAttribute('aria-pressed', String(state.gameMode));
+  gameModeToggleButton.textContent = state.gameMode ? 'Exit game' : 'Game mode';
+  const controls = document.querySelector('.top-controls');
+  const stopButton = document.getElementById('stopPlayback');
+  if (state.gameMode) {
+    controls.insertBefore(stopButton, scoreButton.closest('.score-wrap'));
+  } else {
+    controls.prepend(stopButton);
   }
-  try {
-    await document.documentElement.requestFullscreen();
-  } catch (error) {
-    setStatus('Unable to enter full screen.');
-  }
-}
-
-async function exitFullscreen() {
-  if (!document.fullscreenElement || !document.exitFullscreen) {
-    syncFullscreenButtons();
-    return;
-  }
-  try {
-    await document.exitFullscreen();
-  } catch (error) {
-    setStatus('Unable to exit full screen.');
-  }
+  if (state.gameMode) window.scrollTo(0, 0);
+  renderBoard();
+  gameModeToggleButton.focus();
 }
 
 function toggleMusicLibrary() {
-  const isExpanded = musicLibraryToggleButton.getAttribute('aria-expanded') === 'true';
-  musicLibraryContent.classList.toggle('hidden', isExpanded);
-  musicLibraryToggleButton.textContent = isExpanded ? '+' : '−';
-  musicLibraryToggleButton.setAttribute('aria-expanded', String(!isExpanded));
-  musicLibraryToggleButton.setAttribute('aria-label', `${isExpanded ? 'Expand' : 'Collapse'} Music library`);
-  musicLibraryToggleButton.title = `${isExpanded ? 'Expand' : 'Collapse'} Music library`;
+  const isOpening = musicLibraryDialog.classList.contains('hidden');
+  musicLibraryDialog.classList.toggle('hidden', !isOpening);
+  musicLibraryToggleButton.setAttribute('aria-expanded', String(isOpening));
+  if (isOpening) {
+    document.getElementById('sideMenuList').classList.add('hidden');
+    document.querySelector('.side-menu-toggle').setAttribute('aria-expanded', 'false');
+    musicLibraryFeedback.textContent = '';
+    document.getElementById('musicLibraryClose').focus();
+    loadSharedAudio();
+  } else {
+    document.querySelector('.side-menu-toggle').focus();
+  }
+}
+
+async function loadSharedAudio() {
+  const version = ++sharedAudioLoadVersion;
+  sharedAudioSelect.disabled = true;
+  sharedAudioStatus.textContent = 'Loading shared music...';
+  try {
+    const response = await fetch('/api/shared-audio', { credentials: 'same-origin' });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || 'Could not load shared music.');
+    if (version !== sharedAudioLoadVersion) return;
+    sharedAudioTracks = payload.tracks;
+    const selected = sharedAudioSelect.value;
+    sharedAudioSelect.replaceChildren(new Option('Choose a song', ''));
+    sharedAudioTracks.forEach((track) => {
+      sharedAudioSelect.add(new Option(track.category ? `${track.category} - ${track.name}` : track.name, track.id));
+    });
+    sharedAudioSelect.value = sharedAudioTracks.some((track) => track.id === selected) ? selected : '';
+    sharedAudioStatus.textContent = `${sharedAudioTracks.length} shared songs available. An internet connection is required.`;
+  } catch (error) {
+    if (version === sharedAudioLoadVersion) sharedAudioStatus.textContent = error.message || 'Could not load shared music.';
+  } finally {
+    if (version === sharedAudioLoadVersion) sharedAudioSelect.disabled = false;
+  }
+}
+
+async function uploadSharedAudio(file) {
+  const response = await fetch(`/api/shared-audio?name=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || 'Could not upload audio.');
+  return payload.url;
+}
+
+function addSharedAudioToCategory() {
+  const entry = sharedAudioTracks.find((track) => track.id === sharedAudioSelect.value);
+  if (!entry) {
+    setStatus('Choose a shared song first.');
+    return;
+  }
+  const overrides = getMusicOverrides();
+  if (!overrides) return;
+  const categoryKey = getImportCategoryKey(sharedAudioCategory);
+  const createdCategory = !state.playlists[categoryKey];
+  ensureImportCategory(categoryKey);
+  state.playlists[categoryKey].push({
+    name: overrides.name || entry.name,
+    description: overrides.description || 'Shared app audio',
+    mood: 'custom',
+    startTime: overrides.startTime,
+    stopTime: overrides.stopTime ?? 0,
+    durationSeconds: 0,
+    played: false,
+    audioUrl: entry.url,
+    sharedAudioNameVersion: entry.nameVersion || undefined,
+  });
+  try {
+    savePlaylists();
+  } catch (error) {
+    state.playlists[categoryKey].pop();
+    if (createdCategory) delete state.playlists[categoryKey];
+    setStatus('Could not save this song to your board.');
+    return;
+  }
+  renderBoard();
+  clearMusicOverrides();
+  setStatus(`Added "${entry.name}" to ${formatCategoryTitle(categoryKey)}.`);
+}
+
+function formatOfflineBytes(bytes) {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function getOfflineSharedFiles(key) {
+  const files = new Map();
+  (state.playlists[key] || []).forEach((track) => {
+    const id = sharedAudioStorageId(track.audioUrl);
+    if (id) files.set(id, track.audioUrl);
+  });
+  return files;
+}
+
+function renderOfflinePlaylistControls() {
+  const selected = offlinePlaylistSelect.value;
+  const keys = Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds');
+  offlinePlaylistSelect.replaceChildren(new Option('Choose a category', ''));
+  keys.forEach((key) => {
+    const tracks = state.playlists[key];
+    const ready = offlineInventoryReady && offlineShellReady && tracks.length > 0 && tracks.every(isTrackAvailableOffline);
+    offlinePlaylistSelect.add(new Option(`${formatCategoryTitle(key)}${ready ? ' (ready offline)' : ''}`, key));
+  });
+  offlinePlaylistSelect.value = keys.includes(selected) ? selected : '';
+  offlinePlaylistSelect.disabled = offlineOperation || !offlineInventoryReady;
+  const key = offlinePlaylistSelect.value;
+  const missing = key ? [...getOfflineSharedFiles(key).keys()].filter((id) => !offlineAudioIds.has(id)) : [];
+  if (offlineEstimate && (offlineEstimate.key !== key || offlineEstimate.files.map((file) => file.id).join(',') !== missing.join(','))) {
+    offlineEstimate = null;
+  }
+  downloadOfflinePlaylistButton.disabled = offlineOperation || !window.SOUNDBOARD_USER || !offlineInventoryReady
+    || !navigator.onLine || offlineModeToggleInput.checked || !offlineEstimate || !missing.length;
+  checkOfflinePlaylistButton.disabled = offlineOperation || !offlineInventoryReady || !key;
+  removeOfflineDownloadsButton.disabled = offlineOperation || !window.SOUNDBOARD_USER || !offlineAudioIds.size;
+  if (offlineOperation) return;
+  if (offlineInventoryError) {
+    offlinePlaylistStatus.textContent = `Offline storage is unavailable: ${offlineInventoryError}`;
+    return;
+  }
+  if (!offlineInventoryReady) {
+    offlinePlaylistStatus.textContent = 'Checking offline storage...';
+    return;
+  }
+  const shellNote = offlineShellReady ? '' : (offlineShellError || 'The app is not yet ready to reopen offline. Stay online until offline setup finishes.');
+  if (!key) {
+    offlinePlaylistStatus.textContent = [offlineMessage || 'Choose a category to check its offline availability and download size.', shellNote].filter(Boolean).join(' ');
+    return;
+  }
+  const tracks = state.playlists[key];
+  const ready = tracks.filter(isTrackAvailableOffline).length;
+  const summary = tracks.length ? `${ready} of ${tracks.length} songs ready offline.` : 'This category has no songs.';
+  offlinePlaylistStatus.textContent = [summary, offlineMessage, shellNote].filter(Boolean).join(' ');
+}
+
+async function checkOfflinePlaylist() {
+  const key = offlinePlaylistSelect.value;
+  offlineEstimate = null;
+  offlineMessage = '';
+  if (!key) {
+    renderOfflinePlaylistControls();
+    return;
+  }
+  offlineOperation = true;
+  renderOfflinePlaylistControls();
+  offlinePlaylistStatus.textContent = 'Checking offline storage...';
+  try {
+    await refreshOfflineInventory();
+    const files = [...getOfflineSharedFiles(key)]
+      .filter(([id]) => !offlineAudioIds.has(id))
+      .map(([id, url]) => ({ id, url }));
+    if (!window.SOUNDBOARD_USER) {
+      offlineMessage = 'Sign in online to download shared songs.';
+    } else if (files.length && (!navigator.onLine || offlineModeToggleInput.checked)) {
+      offlineMessage = 'Connect to the internet and turn off Offline mode to check download size.';
+    } else if (files.length) {
+      let total = 0;
+      for (const [index, file] of files.entries()) {
+        offlinePlaylistStatus.textContent = `Checking download size: ${index + 1} of ${files.length} files...`;
+        const response = await fetch(file.url, { method: 'HEAD', credentials: 'same-origin', cache: 'no-store' });
+        if (!response.ok) throw new Error(`Could not check a shared song (HTTP ${response.status}).`);
+        const length = response.headers.get('Content-Length');
+        if (!length || !/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) <= 0) {
+          throw new Error('The server did not provide a valid song size.');
+        }
+        file.size = Number(length);
+        total += file.size;
+      }
+      offlineEstimate = { key, files, total };
+      offlineMessage = `${formatOfflineBytes(total)} to download for ${files.length} shared ${files.length === 1 ? 'file' : 'files'}.`;
+      if (navigator.storage?.estimate) {
+        try {
+          const storage = await navigator.storage.estimate();
+          if (Number.isFinite(storage.quota) && Number.isFinite(storage.usage)) {
+            offlineMessage += ` About ${formatOfflineBytes(Math.max(0, storage.quota - storage.usage))} of browser storage is available.`;
+          } else {
+            offlineMessage += ' Browser storage availability could not be estimated.';
+          }
+        } catch (error) {
+          console.error('Could not estimate browser storage.', error);
+          offlineMessage += ' Browser storage availability could not be estimated.';
+        }
+      }
+    } else {
+      offlineMessage = 'No additional shared songs need downloading. Songs from online services or OneDrive still need internet.';
+    }
+  } catch (error) {
+    console.error('Could not check offline playlist.', error);
+    offlineMessage = `${error.message || 'Could not check offline storage.'} Use Check size / retry to try again.`;
+  } finally {
+    offlineOperation = false;
+    renderOfflinePlaylistControls();
+  }
+}
+
+async function downloadOfflinePlaylist() {
+  if (!offlineEstimate || offlineOperation) return;
+  const estimate = offlineEstimate;
+  offlineOperation = true;
+  offlineMessage = '';
+  renderOfflinePlaylistControls();
+  let downloadedBytes = 0;
+  let persistenceNote = '';
+  try {
+    if (navigator.storage?.persist) {
+      try {
+        if (!await navigator.storage.persist()) persistenceNote = ' Your browser may remove downloads if storage is low.';
+      } catch (error) {
+        console.error('Could not request persistent storage.', error);
+        persistenceNote = ' Your browser may remove downloads if storage is low.';
+      }
+    } else {
+      persistenceNote = ' Your browser may remove downloads if storage is low.';
+    }
+    for (const [index, file] of estimate.files.entries()) {
+      offlinePlaylistStatus.textContent = `Downloading ${index + 1} of ${estimate.files.length} files (${formatOfflineBytes(downloadedBytes)} of ${formatOfflineBytes(estimate.total)} saved)...`;
+      const response = await fetch(file.url, { credentials: 'same-origin', cache: 'no-store' });
+      if (response.status !== 200) throw new Error(`Could not download a shared song (HTTP ${response.status}).`);
+      const blob = await response.blob();
+      if (blob.size !== file.size) throw new Error('A song download was incomplete or changed size. Check its size and retry.');
+      await saveLocalAudioFile(file.id, blob);
+      offlineAudioIds.add(file.id);
+      downloadedBytes += blob.size;
+    }
+    offlineMessage = `Downloaded ${estimate.files.length} shared ${estimate.files.length === 1 ? 'file' : 'files'} (${formatOfflineBytes(downloadedBytes)}).${persistenceNote}`;
+  } catch (error) {
+    console.error('Offline playlist download failed.', error);
+    offlineMessage = `${error.message || 'Download failed.'} Completed files were kept; use Check size / retry to try again.`;
+  } finally {
+    offlineEstimate = null;
+    offlineOperation = false;
+    renderBoard();
+  }
+}
+
+async function removeOfflineDownloads() {
+  if (offlineOperation || !offlineAudioIds.size || !confirm('Remove all downloaded shared songs from this device? Your online library and playlists will not be changed.')) return;
+  offlineOperation = true;
+  offlineMessage = '';
+  renderOfflinePlaylistControls();
+  try {
+    const ids = [...offlineAudioIds];
+    for (const [index, id] of ids.entries()) {
+      offlinePlaylistStatus.textContent = `Removing download ${index + 1} of ${ids.length}...`;
+      await deleteLocalAudioFile(id);
+      offlineAudioIds.delete(id);
+      const url = state.localAudioObjectUrls.get(id);
+      state.localAudioObjectUrls.delete(id);
+      if (url && sharedAudioStorageId(state.currentTrack?.audioUrl) === id) {
+        const release = () => {
+          URL.revokeObjectURL(url);
+          customAudio.removeEventListener('ended', release);
+          customAudio.removeEventListener('emptied', release);
+        };
+        customAudio.addEventListener('ended', release);
+        customAudio.addEventListener('emptied', release);
+      } else if (url) {
+        URL.revokeObjectURL(url);
+      }
+    }
+    offlineMessage = 'Downloaded shared songs were removed from this device.';
+  } catch (error) {
+    console.error('Could not remove offline downloads.', error);
+    offlineMessage = `${error.message || 'Could not remove all downloads.'} Some files may still be saved.`;
+  } finally {
+    offlineEstimate = null;
+    offlineOperation = false;
+    renderBoard();
+  }
 }
 
 function toggleBuiltInSounds() {
@@ -2526,8 +3112,8 @@ function syncMusicSourceVisibility() {
   localMp3Source.classList.toggle('hidden', !useLocalMp3);
   offlineModeNotice.classList.toggle('hidden', !localOnly);
   offlineModeNotice.textContent = browserOffline
-    ? 'You are offline. Online music needs internet; stored MP3s remain available.'
-    : 'Offline mode is on. Only locally stored MP3s can play without internet.';
+    ? 'You are offline. Online music needs internet; stored audio files remain available.'
+    : 'Offline mode is on. Only locally stored audio files can play without internet.';
   document.body.dataset.offlineMode = String(localOnly);
 }
 
@@ -2536,11 +3122,16 @@ function isOfflineModeActive() {
 }
 
 function isTrackAvailableOffline(track) {
-  return Boolean(track.audioDataUrl || track.audioStorageId || track.audioUrl) || (!track.spotifyUrl && !track.youtubeUrl && !track.youtubeEmbedUrl && !track.appleMusicUrl);
+  if (track.audioDataUrl) return true;
+  if (track.audioStorageId) return offlineLocalAudioIds.has(track.audioStorageId);
+  const sharedId = sharedAudioStorageId(track.audioUrl);
+  if (sharedId) return offlineAudioIds.has(sharedId);
+  if (track.audioUrl) return offlineCachedUrls.has(track.audioUrl);
+  return !track.oneDriveItemId && !track.spotifyUrl && !track.youtubeUrl && !track.youtubeEmbedUrl && !track.appleMusicUrl;
 }
 
 function isTrackPlayableHere(track) {
-  return isTrackIntegrationEnabled(track) && (!track.appleMusicUrl || Boolean(track.audioDataUrl || track.audioStorageId || track.audioUrl || track.spotifyUrl || track.youtubeUrl || track.youtubeEmbedUrl));
+  return isTrackIntegrationEnabled(track) && (!track.appleMusicUrl || Boolean(track.audioDataUrl || track.audioStorageId || track.oneDriveItemId || track.audioUrl || track.spotifyUrl || track.youtubeUrl || track.youtubeEmbedUrl));
 }
 
 function getUrlIntegration(url) {
@@ -2592,7 +3183,13 @@ function toggleOfflineMode() {
 
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('./service-worker.js').catch(() => {});
+    navigator.serviceWorker.register('./service-worker.js').catch((error) => {
+      console.error('Could not set up the offline app.', error);
+      offlineShellError = 'Offline app setup failed. Reload while online and try again.';
+      renderOfflinePlaylistControls();
+    });
+  } else {
+    offlineShellError = 'This browser cannot reopen the app offline.';
   }
 }
 
@@ -2612,8 +3209,15 @@ function formatCategoryTitle(key) {
     .join(' ');
 }
 
+let gameStatusTimer = null;
 function setStatus(message) {
   statusBar.textContent = message;
+  if (!musicLibraryDialog.classList.contains('hidden')) musicLibraryFeedback.textContent = message;
+  if (state.gameMode) {
+    statusBar.classList.add('game-status-visible');
+    clearTimeout(gameStatusTimer);
+    gameStatusTimer = window.setTimeout(() => statusBar.classList.remove('game-status-visible'), 4000);
+  }
 }
 
 function openScoreDialog() {
@@ -2964,6 +3568,8 @@ function saveSongEdits() {
     return;
   }
   const previousAudioStorageId = track.audioStorageId;
+  const previousOneDriveItemId = track.oneDriveItemId;
+  const previousOneDriveAccountId = track.oneDriveAccountId;
   const targetCategoryKey = editSongCategorySelect.value;
   if (!state.playlists[targetCategoryKey]) {
     setStatus('Choose a category for this song.');
@@ -3011,6 +3617,8 @@ function saveSongEdits() {
     track.youtubeEmbedUrl = '';
     delete track.audioDataUrl;
     delete track.audioStorageId;
+    delete track.oneDriveItemId;
+    delete track.oneDriveAccountId;
     delete track.audioUrl;
   } else if (appleLink?.type === 'song') {
     track.appleMusicUrl = appleLink.url;
@@ -3019,6 +3627,8 @@ function saveSongEdits() {
     track.youtubeEmbedUrl = '';
     delete track.audioDataUrl;
     delete track.audioStorageId;
+    delete track.oneDriveItemId;
+    delete track.oneDriveAccountId;
     delete track.audioUrl;
   } else {
     track.spotifyUrl = '';
@@ -3026,6 +3636,8 @@ function saveSongEdits() {
     track.youtubeEmbedUrl = youtubeEmbedUrl;
     delete track.audioDataUrl;
     delete track.audioStorageId;
+    delete track.oneDriveItemId;
+    delete track.oneDriveAccountId;
     delete track.audioUrl;
   }
 
@@ -3050,6 +3662,9 @@ function saveSongEdits() {
   savePlaylists();
   if (link && previousAudioStorageId) {
     removeStoredAudioFile(previousAudioStorageId, track);
+  }
+  if (link && previousOneDriveItemId) {
+    removeOneDriveAudioFile(previousOneDriveItemId, previousOneDriveAccountId, track);
   }
   renderBoard();
   closeSongEditor();
@@ -3081,6 +3696,7 @@ function deleteSongFromPlaylist() {
   }
 
   removeStoredAudioFile(track.audioStorageId, track);
+  removeOneDriveAudioFile(track.oneDriveItemId, track.oneDriveAccountId, track);
   state.playlists[categoryKey].splice(index, 1);
   if (!state.playlists[categoryKey].length) {
     delete state.playlists[categoryKey];
@@ -3094,10 +3710,13 @@ function deleteSongFromPlaylist() {
 
 function getTrackSourceLabel(track) {
   if (track.audioUrl) {
-    return 'Built-in';
+    return track.audioUrl.startsWith('/api/shared-audio/') ? 'Shared audio' : 'Built-in';
+  }
+  if (track.oneDriveItemId) {
+    return 'OneDrive';
   }
   if (track.audioDataUrl || track.audioStorageId) {
-    return 'MP3';
+    return 'Audio';
   }
   if (track.youtubeEmbedUrl || track.youtubeUrl) {
     return 'YouTube';
@@ -3195,7 +3814,11 @@ function startLocalAudioPlayback(track, source) {
   state.customType = 'file';
   state.currentTrackElapsedMs = 0;
   state.currentTrackStartedAt = performance.now();
-  customAudio.play().catch(() => setStatus(`Unable to play ${track.name}.`));
+  customAudio.play().catch(() => {
+    if (state.currentTrack === track && state.customType === 'file') {
+      setStatus(`Unable to play ${track.name}.`);
+    }
+  });
   customAudio.onended = () => {
     if (state.currentTrack === track) {
       finishCurrentTrack(track);
@@ -3220,22 +3843,25 @@ function startLocalAudioPlayback(track, source) {
   };
   schedulePlayedThreshold();
   setStatus(track.audioUrl
-    ? `${track.name} is playing from built-in sounds.`
-    : `${track.name} is playing from your MP3.`);
+    ? `${track.name} is playing from ${track.audioUrl.startsWith('/api/shared-audio/') ? 'shared app storage' : 'built-in sounds'}.`
+    : `${track.name} is playing from audio storage.`);
 }
 
 function playCustomSource(track) {
   if (!isTrackIntegrationEnabled(track)) return false;
-  const storedObjectUrl = track.audioStorageId ? state.localAudioObjectUrls.get(track.audioStorageId) : '';
-  const trackAudioSource = track.audioDataUrl || storedObjectUrl || track.audioUrl || '';
+  const sharedId = sharedAudioStorageId(track.audioUrl);
+  const cachedSharedId = sharedId && offlineAudioIds.has(sharedId) ? sharedId : '';
+  const localStorageId = track.audioStorageId || cachedSharedId;
+  const storedObjectUrl = localStorageId ? state.localAudioObjectUrls.get(localStorageId) : '';
+  const trackAudioSource = track.audioDataUrl || storedObjectUrl || (cachedSharedId ? '' : track.audioUrl) || '';
   const trackYouTubeSource = track.youtubeEmbedUrl;
   const trackSpotifySource = getSpotifyTrackUri(track);
-  const sourceType = trackAudioSource || track.audioStorageId ? 'file' : trackYouTubeSource ? 'youtube' : trackSpotifySource ? 'spotify' : null;
+  const sourceType = trackAudioSource || localStorageId || track.oneDriveItemId ? 'file' : trackYouTubeSource ? 'youtube' : trackSpotifySource ? 'spotify' : null;
   const source = trackAudioSource || trackYouTubeSource || trackSpotifySource;
   const startTime = Number(track.startTime) || 0;
   const stopTime = Number(track.stopTime) || 0;
 
-  if (!sourceType || (!source && !(sourceType === 'file' && track.audioStorageId)) || state.isPaused) {
+  if (!sourceType || (!source && !(sourceType === 'file' && (localStorageId || track.oneDriveItemId))) || state.isPaused) {
     return false;
   }
 
@@ -3247,24 +3873,35 @@ function playCustomSource(track) {
       return true;
     }
 
-    state.customSource = track.audioStorageId;
+    const storageId = localStorageId || track.oneDriveItemId;
+    state.customSource = storageId;
     state.customType = 'file';
     setStatus(`Loading ${track.name}...`);
-    loadLocalAudioFile(track.audioStorageId).then((file) => {
-      if (!file) {
-        throw new Error('The stored MP3 file could not be found. Reimport the file to restore it.');
+    const audioUrlPromise = !localStorageId && track.oneDriveItemId
+      ? window.SoundboardOneDrive.getDownloadUrl(track.oneDriveItemId, track.oneDriveAccountId)
+      : loadLocalAudioFile(storageId).then((file) => {
+        if (!file) {
+          offlineAudioIds.delete(storageId);
+          offlineLocalAudioIds.delete(storageId);
+          throw new Error(cachedSharedId
+            ? 'The downloaded song is missing. Download it again while online.'
+            : 'The stored audio file could not be found. Reimport the file to restore it.');
+        }
+        return URL.createObjectURL(file);
+      });
+    audioUrlPromise.then((audioUrl) => {
+      if (localStorageId) {
+        state.localAudioObjectUrls.set(storageId, audioUrl);
       }
-      const objectUrl = URL.createObjectURL(file);
-      state.localAudioObjectUrls.set(track.audioStorageId, objectUrl);
       if (state.currentTrack !== track || state.customType !== 'file') {
         return;
       }
       if (state.isPaused) {
-        customAudio.src = objectUrl;
+        customAudio.src = audioUrl;
         customAudio.pause();
         return;
       }
-      startLocalAudioPlayback(track, objectUrl);
+      startLocalAudioPlayback(track, audioUrl);
     }).catch((error) => {
       if (state.currentTrack === track) {
         clearTrackPlaybackTimers();
@@ -3413,8 +4050,8 @@ function playHornAudio(source, statusMessage) {
     if (activeHornAudio === hornAudio) {
       activeHornAudio = null;
       hornPlaying = false;
+      setStatus('Unable to play the selected horn.');
     }
-    setStatus('Unable to play the selected horn.');
   });
   setStatus(statusMessage);
 }
@@ -3585,10 +4222,14 @@ function renderSongOptions() {
   const copyCategoryValue = copySongCategorySelect.value;
   const musicCurrentValue = musicCategorySelect.value;
   const mp3CurrentValue = mp3CategorySelect.value;
+  const sharedAudioCategoryValue = sharedAudioCategory.value;
+  const sharedPlaylistCategoryValue = sharedPlaylistCategory.value;
   editSongCategorySelect.innerHTML = '';
   copySongCategorySelect.innerHTML = '';
   musicCategorySelect.innerHTML = '';
   mp3CategorySelect.innerHTML = '';
+  sharedAudioCategory.replaceChildren(new Option('Uncategorized', ''));
+  sharedPlaylistCategory.replaceChildren(new Option('Uncategorized', ''));
 
   const editCategoryPlaceholder = document.createElement('option');
   editCategoryPlaceholder.value = '';
@@ -3633,6 +4274,12 @@ function renderSongOptions() {
     mp3Option.textContent = formatCategoryTitle(key);
     mp3Option.selected = key === mp3CurrentValue;
     mp3CategorySelect.appendChild(mp3Option);
+    const sharedOption = new Option(formatCategoryTitle(key), key);
+    sharedOption.selected = key === sharedAudioCategoryValue;
+    sharedAudioCategory.add(sharedOption);
+    const sharedPlaylistOption = new Option(formatCategoryTitle(key), key);
+    sharedPlaylistOption.selected = key === sharedPlaylistCategoryValue;
+    sharedPlaylistCategory.add(sharedPlaylistOption);
   });
 
 }
@@ -3641,8 +4288,8 @@ function clearDropIndicators() {
   document.querySelectorAll('.track-button.drop-before, .track-button.drop-after').forEach((button) => {
     button.classList.remove('drop-before', 'drop-after');
   });
-  document.querySelectorAll('.playlist-column.drop-target, .playlist-column.category-drop-target, .playlist-column.category-dragging').forEach((column) => {
-    column.classList.remove('drop-target', 'category-drop-target', 'category-dragging');
+  document.querySelectorAll('.playlist-column.drop-target, .playlist-column.category-drop-target, .playlist-column.category-dragging, .playlist-column.category-drop-before, .playlist-column.category-drop-after').forEach((column) => {
+    column.classList.remove('drop-target', 'category-drop-target', 'category-dragging', 'category-drop-before', 'category-drop-after', 'category-drop-horizontal');
   });
   boardElement.querySelector('.category-drop-slot')?.remove();
 }
@@ -3650,7 +4297,7 @@ function clearDropIndicators() {
 const CATEGORY_GRID_ROW_HEIGHT = 110;
 const CATEGORY_GRID_GAP = 10;
 const CATEGORY_GRID_MIN_COLUMN_WIDTH = 270;
-const CATEGORY_GRID_MAX_WIDTH = 2;
+const CATEGORY_GRID_MAX_WIDTH = 2 * CATEGORY_WIDTH_UNITS;
 const CATEGORY_GRID_MIN_HEIGHT = 3;
 const CATEGORY_GRID_MAX_HEIGHT = 10;
 const CATEGORY_GRID_DEFAULT_HEIGHT = 4;
@@ -3664,15 +4311,15 @@ function categoryRectOverlapsOthers(placement, key, rect) {
   return [...placement].some(([otherKey, other]) => otherKey !== key && categoryRectsOverlap(other, rect));
 }
 
-function computeCategoryPlacement(keys, columns) {
+function computeCategoryPlacement(keys, columns, mobile = false) {
   const placement = new Map();
   const pending = [];
   keys.forEach((key) => {
-    const saved = state.categorySizes[key] || {};
+    const saved = (mobile ? state.mobileCategorySizes : state.categorySizes)[key] || {};
     const rect = {
-      col: saved.col,
-      row: saved.row,
-      w: Math.min(columns, saved.w || 1),
+      col: mobile || !Number.isFinite(saved.col) ? undefined : Math.round(saved.col * CATEGORY_WIDTH_UNITS),
+      row: mobile ? undefined : saved.row,
+      w: Math.min(columns, Math.max(1, Math.round((saved.w || 1) * CATEGORY_WIDTH_UNITS))),
       h: saved.h || CATEGORY_GRID_DEFAULT_HEIGHT
     };
     if (Number.isInteger(rect.col) && Number.isInteger(rect.row) && rect.col >= 0 && rect.row >= 0
@@ -3683,12 +4330,22 @@ function computeCategoryPlacement(keys, columns) {
     }
   });
 
+  let cursorRow = 0;
+  let cursorCol = 0;
   pending.forEach(({ key, w, h }) => {
-    for (let row = 0; !placement.has(key); row += 1) {
-      for (let col = 0; col + w <= columns; col += 1) {
+    for (let row = mobile ? cursorRow : 0; !placement.has(key); row += 1) {
+      for (let col = mobile && row === cursorRow ? cursorCol : 0; col + w <= columns; col += 1) {
         const rect = { col, row, w, h };
         if (!categoryRectOverlapsOthers(placement, key, rect)) {
           placement.set(key, rect);
+          if (mobile) {
+            cursorRow = row;
+            cursorCol = col + w;
+            if (cursorCol >= columns) {
+              cursorRow += 1;
+              cursorCol = 0;
+            }
+          }
           break;
         }
       }
@@ -3704,30 +4361,39 @@ function isMobileBoardLayout() {
   return MOBILE_BOARD_QUERY.matches;
 }
 
-// Phones stack categories in desktop reading order without touching saved desktop positions.
-function applyMobileBoardLayout(cards) {
-  boardElement.classList.add('board-mobile');
-  boardElement.style.gridTemplateColumns = '';
-  boardElement.style.gridTemplateRows = '';
-  boardElement.querySelectorAll('.category-grid-cell').forEach((cell) => cell.remove());
-  delete boardElement.dataset.gridColumns;
-  categoryGrid = { columns: 1, rows: 0, cellWidth: boardElement.clientWidth, placement: new Map() };
-
-  const position = (card) => {
-    const saved = state.categorySizes[card.dataset.categoryKey] || {};
-    return Number.isInteger(saved.row) && Number.isInteger(saved.col)
+function categoriesInDesktopOrder(keys) {
+  const position = (key) => {
+    const saved = state.categorySizes[key] || {};
+    return Number.isInteger(saved.row) && Number.isFinite(saved.col)
       ? [saved.row, saved.col]
       : [Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER];
   };
-  cards
-    .map((card, index) => ({ card, index, pos: position(card) }))
+  return keys
+    .map((key, index) => ({ key, index, pos: position(key) }))
     .sort((a, b) => a.pos[0] - b.pos[0] || a.pos[1] - b.pos[1] || a.index - b.index)
-    .forEach(({ card }, order) => {
-      card.style.gridColumn = '';
-      card.style.gridRow = '';
-      card.style.order = String(order);
-      fitTrackListToVisibleSongs(card.querySelector('.track-list'));
-    });
+    .map(({ key }) => key);
+}
+
+function mobileCategoryOrder() {
+  const keys = Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds');
+  const desktopOrder = categoriesInDesktopOrder(keys);
+  return desktopOrder.sort((a, b) =>
+    (state.mobileCategorySizes[a]?.order ?? Number.MAX_SAFE_INTEGER)
+    - (state.mobileCategorySizes[b]?.order ?? Number.MAX_SAFE_INTEGER));
+}
+
+function moveMobileCategory(categoryKey, targetKey, after) {
+  const keys = mobileCategoryOrder();
+  const from = keys.indexOf(categoryKey);
+  if (from < 0 || !keys.includes(targetKey) || categoryKey === targetKey) return false;
+  keys.splice(from, 1);
+  keys.splice(keys.indexOf(targetKey) + (after ? 1 : 0), 0, categoryKey);
+  keys.forEach((key, order) => {
+    state.mobileCategorySizes[key] = { ...state.mobileCategorySizes[key], order };
+  });
+  saveCategorySizes(true);
+  updateCategoryGridLayout();
+  return true;
 }
 
 function fitTrackListToVisibleSongs(list) {
@@ -3754,24 +4420,52 @@ function updateCategoryGridLayout() {
   }
 
   const cards = [...boardElement.querySelectorAll('.playlist-column')];
-  if (isMobileBoardLayout()) {
-    applyMobileBoardLayout(cards);
+  if (state.gameMode) {
+    boardElement.classList.remove('board-mobile');
+    boardElement.querySelectorAll('.category-grid-cell').forEach((cell) => cell.remove());
+    delete boardElement.dataset.gridColumns;
+    const minWidth = isMobileBoardLayout() ? 148 : 260;
+    const columns = Math.max(1, Math.min(cards.length || 1, Math.floor((boardWidth + CATEGORY_GRID_GAP) / (minWidth + CATEGORY_GRID_GAP))));
+    const rows = Math.max(1, Math.ceil(cards.length / columns));
+    const viewportBottom = (window.visualViewport?.offsetTop || 0) + (window.visualViewport?.height || window.innerHeight);
+    const controlsTop = document.querySelector('.topbar').getBoundingClientRect().top;
+    const availableHeight = Math.max(0, Math.min(viewportBottom, controlsTop) - boardElement.getBoundingClientRect().top - 6);
+    boardElement.style.height = `${availableHeight}px`;
+    boardElement.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
+    boardElement.style.gridTemplateRows = `repeat(${rows}, minmax(80px, 1fr))`;
+    boardElement.classList.toggle('game-compact', isMobileBoardLayout() || (availableHeight - CATEGORY_GRID_GAP * (rows - 1)) / rows < 180);
+    cards.map((card, index) => {
+      const saved = state.categorySizes[card.dataset.categoryKey] || {};
+      return { card, index, row: Number.isInteger(saved.row) ? saved.row : Number.MAX_SAFE_INTEGER,
+        col: Number.isFinite(saved.col) ? saved.col : Number.MAX_SAFE_INTEGER };
+    }).sort((a, b) => a.row - b.row || a.col - b.col || a.index - b.index)
+      .forEach(({ card }, order) => {
+        card.classList.remove('category-narrow');
+        card.style.gridColumn = '';
+        card.style.gridRow = '';
+        card.style.order = String(order);
+        const list = card.querySelector('.track-list');
+        if (list) list.style.maxHeight = '';
+      });
     return;
   }
-  if (boardElement.classList.contains('board-mobile')) {
-    boardElement.classList.remove('board-mobile');
-    cards.forEach((card) => {
-      card.style.order = '';
-      const list = card.querySelector('.track-list');
-      if (list) {
-        list.style.maxHeight = '';
-      }
-    });
-  }
+  boardElement.style.height = '';
+  boardElement.classList.remove('game-compact');
+  const mobile = isMobileBoardLayout();
+  boardElement.classList.toggle('board-mobile', mobile);
+  cards.forEach((card) => {
+    card.style.order = '';
+    const list = card.querySelector('.track-list');
+    if (list) list.style.maxHeight = '';
+  });
 
-  const columns = Math.max(1, Math.floor((boardWidth + CATEGORY_GRID_GAP) / (CATEGORY_GRID_MIN_COLUMN_WIDTH + CATEGORY_GRID_GAP)));
+  const baseColumns = mobile ? 1 : Math.max(1, Math.floor((boardWidth + CATEGORY_GRID_GAP) / (CATEGORY_GRID_MIN_COLUMN_WIDTH + CATEGORY_GRID_GAP)));
+  const columns = baseColumns * CATEGORY_WIDTH_UNITS;
   const cellWidth = (boardWidth - CATEGORY_GRID_GAP * (columns - 1)) / columns;
-  const placement = computeCategoryPlacement(cards.map((card) => card.dataset.categoryKey), columns);
+  const mobileOrder = mobile ? mobileCategoryOrder() : [];
+  const orderedCards = mobile ? [...cards].sort((a, b) =>
+    mobileOrder.indexOf(a.dataset.categoryKey) - mobileOrder.indexOf(b.dataset.categoryKey)) : cards;
+  const placement = computeCategoryPlacement(orderedCards.map((card) => card.dataset.categoryKey), columns, mobile);
   const bottom = Math.max(0, ...[...placement.values()].map((rect) => rect.row + rect.h));
   const rows = Math.max(CATEGORY_GRID_MAX_HEIGHT, bottom + 2);
   categoryGrid = { columns, rows, cellWidth, placement };
@@ -3780,15 +4474,15 @@ function updateCategoryGridLayout() {
   boardElement.style.gridTemplateRows = `repeat(${rows}, ${CATEGORY_GRID_ROW_HEIGHT}px)`;
 
   const cells = boardElement.querySelectorAll('.category-grid-cell');
-  if (cells.length !== columns * rows || boardElement.dataset.gridColumns !== String(columns)) {
+  if (cells.length !== baseColumns * rows || boardElement.dataset.gridColumns !== String(columns)) {
     cells.forEach((cell) => cell.remove());
     const fragment = document.createDocumentFragment();
     for (let row = 0; row < rows; row += 1) {
-      for (let col = 0; col < columns; col += 1) {
+      for (let col = 0; col < columns; col += CATEGORY_WIDTH_UNITS) {
         const cell = document.createElement('div');
         cell.className = 'category-grid-cell';
         cell.setAttribute('aria-hidden', 'true');
-        cell.style.gridColumn = String(col + 1);
+        cell.style.gridColumn = `${col + 1} / span ${CATEGORY_WIDTH_UNITS}`;
         cell.style.gridRow = String(row + 1);
         fragment.appendChild(cell);
       }
@@ -3801,6 +4495,8 @@ function updateCategoryGridLayout() {
     const rect = placement.get(card.dataset.categoryKey);
     card.style.gridColumn = `${rect.col + 1} / span ${rect.w}`;
     card.style.gridRow = `${rect.row + 1} / span ${rect.h}`;
+    card.classList.toggle('category-narrow', rect.w * cellWidth + (rect.w - 1) * CATEGORY_GRID_GAP < 200);
+    if (mobile) fitTrackListToVisibleSongs(card.querySelector('.track-list'));
   });
 }
 
@@ -3833,6 +4529,136 @@ function showCategoryDropSlot(target) {
   slot.classList.toggle('invalid', !target.valid);
   slot.style.gridColumn = `${target.col + 1} / span ${target.w}`;
   slot.style.gridRow = `${target.row + 1} / span ${target.h}`;
+}
+
+function mobileCategoryDropTarget(categoryKey, x, y) {
+  const boardRect = boardElement.getBoundingClientRect();
+  if (x < boardRect.left || x > boardRect.right || y < boardRect.top || y > boardRect.bottom) return null;
+  const cards = [...boardElement.querySelectorAll('.playlist-column')];
+  const source = cards.find((card) => card.dataset.categoryKey === categoryKey);
+  if (!source) return null;
+  const sourceRect = source.getBoundingClientRect();
+  if (x >= sourceRect.left && x <= sourceRect.right && y >= sourceRect.top && y <= sourceRect.bottom) return null;
+  const candidates = cards.filter((card) => card !== source).map((card) => {
+    const rect = card.getBoundingClientRect();
+    const dx = Math.max(rect.left - x, 0, x - rect.right);
+    const dy = Math.max(rect.top - y, 0, y - rect.bottom);
+    return { card, rect, distance: dx * dx + dy * dy };
+  }).sort((a, b) => a.distance - b.distance);
+  if (!candidates.length) return null;
+  const { card, rect } = candidates[0];
+  const sameRow = categoryGrid.placement.get(categoryKey).row === categoryGrid.placement.get(card.dataset.categoryKey).row;
+  return { key: card.dataset.categoryKey, after: sameRow ? x >= (rect.left + rect.right) / 2 : y >= (rect.top + rect.bottom) / 2, card, horizontal: sameRow };
+}
+
+function beginCategoryCardMove(event, categoryKey, column) {
+  if (event.button !== 0 || state.gameMode) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const mobile = isMobileBoardLayout();
+  const start = { x: event.clientX, y: event.clientY };
+  const columnRect = column.getBoundingClientRect();
+  const pointerId = event.pointerId;
+  let point = start;
+  let moving = false;
+  let target = null;
+  let scrollFrame = 0;
+  state.categoryDragKey = categoryKey;
+  state.categoryDragOffset = { x: start.x - columnRect.left, y: start.y - columnRect.top };
+  state.dragInfo = null;
+  event.currentTarget.setPointerCapture(pointerId);
+
+  const updateTarget = () => {
+    clearDropIndicators();
+    column.classList.add('category-dragging');
+    if (mobile) {
+      target = mobileCategoryDropTarget(categoryKey, point.x, point.y);
+      if (target) {
+        target.card.classList.add(target.after ? 'category-drop-after' : 'category-drop-before');
+        target.card.classList.toggle('category-drop-horizontal', target.horizontal);
+      }
+    } else {
+      const bounds = boardElement.getBoundingClientRect();
+      target = point.x >= bounds.left && point.x <= bounds.right && point.y >= bounds.top && point.y <= bounds.bottom
+        ? getCategoryGridDropTarget({ clientX: point.x, clientY: point.y }) : null;
+      if (target) showCategoryDropSlot(target);
+    }
+  };
+  const scrollWhileMoving = () => {
+    if (!moving) return;
+    const top = Math.max(0, document.querySelector('.topbar').getBoundingClientRect().bottom);
+    const speed = point.y > window.innerHeight - 48 ? 15
+      : point.y < Math.min(window.innerHeight / 2, top + 32) ? -15 : 0;
+    if (speed) {
+      window.scrollBy(0, speed);
+      updateTarget();
+    }
+    scrollFrame = requestAnimationFrame(scrollWhileMoving);
+  };
+  const finish = (finishEvent) => {
+    if (finishEvent.pointerId !== pointerId) return;
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', finish);
+    document.removeEventListener('pointercancel', finish);
+    cancelAnimationFrame(scrollFrame);
+    const cancelled = finishEvent.type === 'pointercancel' || !column.isConnected || state.gameMode || mobile !== isMobileBoardLayout();
+    state.categoryDragKey = null;
+    state.categoryDragOffset = null;
+    clearDropIndicators();
+    if (!moving || cancelled || !target) return;
+    if (mobile) {
+      if (moveMobileCategory(categoryKey, target.key, target.after)) setStatus(`${formatCategoryTitle(categoryKey)} moved.`);
+    } else if (target.valid) {
+      commitCategoryLayout(categoryKey, target);
+      saveCategorySizes();
+      updateCategoryGridLayout();
+      setStatus(`${formatCategoryTitle(categoryKey)} moved.`);
+    } else {
+      setStatus('That spot is already taken.');
+    }
+  };
+  const move = (moveEvent) => {
+    if (moveEvent.pointerId !== pointerId) return;
+    if (!column.isConnected || state.gameMode || mobile !== isMobileBoardLayout()) {
+      finish({ type: 'pointercancel', pointerId });
+      return;
+    }
+    point = { x: moveEvent.clientX, y: moveEvent.clientY };
+    if (!moving && Math.hypot(point.x - start.x, point.y - start.y) >= 6) {
+      moving = true;
+      scrollFrame = requestAnimationFrame(scrollWhileMoving);
+    }
+    if (moving) updateTarget();
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', finish);
+  document.addEventListener('pointercancel', finish);
+}
+
+function moveCategoryWithKeyboard(event, categoryKey) {
+  const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+  if (!direction) return;
+  event.preventDefault();
+  if (isMobileBoardLayout()) {
+    const keys = mobileCategoryOrder().filter((key) => categoryGrid.placement.has(key));
+    const index = keys.indexOf(categoryKey);
+    const after = direction[0] > 0 || direction[1] > 0;
+    const target = keys[index + (after ? 1 : -1)];
+    if (target && moveMobileCategory(categoryKey, target, after)) setStatus(`${formatCategoryTitle(categoryKey)} moved.`);
+    return;
+  }
+  const current = categoryGrid.placement.get(categoryKey);
+  if (!current) return;
+  const next = { ...current, col: current.col + direction[0], row: current.row + direction[1] };
+  if (next.col < 0 || next.col + next.w > categoryGrid.columns || next.row < 0 ||
+      categoryRectOverlapsOthers(categoryGrid.placement, categoryKey, next)) {
+    setStatus('That spot is already taken or outside the grid.');
+    return;
+  }
+  commitCategoryLayout(categoryKey, next);
+  saveCategorySizes();
+  updateCategoryGridLayout();
+  setStatus(`${formatCategoryTitle(categoryKey)} moved.`);
 }
 
 boardElement.addEventListener('dragover', (event) => {
@@ -3905,11 +4731,15 @@ function scrollTrackListToButton(list, button) {
 }
 
 function commitCategoryLayout(categoryKey, rect) {
+  if (isMobileBoardLayout()) {
+    state.mobileCategorySizes[categoryKey] = { ...state.mobileCategorySizes[categoryKey], w: rect.w / CATEGORY_WIDTH_UNITS, h: rect.h };
+    return;
+  }
   categoryGrid.placement.forEach((placed, key) => {
     const saved = state.categorySizes[key] || {};
-    state.categorySizes[key] = { w: saved.w || 1, h: saved.h || CATEGORY_GRID_DEFAULT_HEIGHT, col: placed.col, row: placed.row };
+    state.categorySizes[key] = { w: saved.w || 1, h: saved.h || CATEGORY_GRID_DEFAULT_HEIGHT, col: placed.col / CATEGORY_WIDTH_UNITS, row: placed.row };
   });
-  state.categorySizes[categoryKey] = { col: rect.col, row: rect.row, w: rect.w, h: rect.h };
+  state.categorySizes[categoryKey] = { col: rect.col / CATEGORY_WIDTH_UNITS, row: rect.row, w: rect.w / CATEGORY_WIDTH_UNITS, h: rect.h };
 }
 
 function resizeCategoryCard(categoryKey, width, height, persist = true) {
@@ -3920,7 +4750,7 @@ function resizeCategoryCard(categoryKey, width, height, persist = true) {
   const w = Math.max(1, Math.min(CATEGORY_GRID_MAX_WIDTH, categoryGrid.columns, Math.round(width)));
   const h = Math.max(CATEGORY_GRID_MIN_HEIGHT, Math.min(CATEGORY_GRID_MAX_HEIGHT, Math.round(height)));
   const next = { col: Math.min(current.col, categoryGrid.columns - w), row: current.row, w, h };
-  if (categoryRectOverlapsOthers(categoryGrid.placement, categoryKey, next)) {
+  if (!isMobileBoardLayout() && categoryRectOverlapsOthers(categoryGrid.placement, categoryKey, next)) {
     return false;
   }
   if (next.col === current.col && w === current.w && h === current.h) {
@@ -3929,7 +4759,7 @@ function resizeCategoryCard(categoryKey, width, height, persist = true) {
   commitCategoryLayout(categoryKey, next);
   updateCategoryGridLayout();
   if (persist) {
-    saveCategorySizes();
+    saveCategorySizes(isMobileBoardLayout());
   }
   return true;
 }
@@ -3954,7 +4784,7 @@ function beginCategoryCardResize(event, categoryKey, column) {
     document.removeEventListener('pointermove', handlePointerMove);
     document.removeEventListener('pointerup', finishResize);
     document.removeEventListener('pointercancel', finishResize);
-    saveCategorySizes();
+    saveCategorySizes(isMobileBoardLayout());
   };
 
   document.addEventListener('pointermove', handlePointerMove);
@@ -3963,6 +4793,7 @@ function beginCategoryCardResize(event, categoryKey, column) {
 }
 
 window.addEventListener('resize', updateCategoryGridLayout);
+window.visualViewport?.addEventListener('resize', updateCategoryGridLayout);
 
 function reorderSongs(sourceCategoryKey, fromIndex, targetCategoryKey, targetIndex) {
   const sourceTracks = state.playlists[sourceCategoryKey];
@@ -4009,6 +4840,7 @@ function reorderSongs(sourceCategoryKey, fromIndex, targetCategoryKey, targetInd
 function renderBoard() {
   boardElement.innerHTML = '';
   renderCategoryVisibilityPicker();
+  renderOfflinePlaylistControls();
 
   const visibleCategories = Object.entries(state.playlists)
     .filter(([key]) => key !== 'built-in-sounds' && !state.hiddenCategories.has(key) && isCategoryIntegrationVisible(key));
@@ -4017,6 +4849,16 @@ function renderBoard() {
     const column = document.createElement('section');
     column.className = 'playlist-column';
     column.dataset.categoryKey = key;
+    if (!state.gameMode) {
+      const grabBar = document.createElement('button');
+      grabBar.type = 'button';
+      grabBar.className = 'category-grab-bar';
+      grabBar.setAttribute('aria-label', `Move ${formatCategoryTitle(key)} category`);
+      grabBar.title = 'Drag to move category, or use arrow keys';
+      grabBar.addEventListener('pointerdown', (event) => beginCategoryCardMove(event, key, column));
+      grabBar.addEventListener('keydown', (event) => moveCategoryWithKeyboard(event, key));
+      column.appendChild(grabBar);
+    }
     column.addEventListener('dragover', (event) => {
       if (!state.dragInfo || event.target.closest('.track-button')) {
         return;
@@ -4050,11 +4892,13 @@ function renderBoard() {
 
     const heading = document.createElement('h2');
     heading.textContent = formatCategoryTitle(key);
-    heading.title = 'Drag to reorder; long press to rename category';
-    heading.tabIndex = 0;
-    heading.draggable = true;
-    heading.setAttribute('aria-label', `${formatCategoryTitle(key)} category. Long press or press Enter to rename.`);
-    heading.addEventListener('pointerdown', () => createCategoryRenameLongPressTimer(heading, key));
+    heading.title = state.gameMode ? formatCategoryTitle(key) : 'Drag to reorder; long press to rename category';
+    heading.tabIndex = state.gameMode ? -1 : 0;
+    heading.draggable = !state.gameMode;
+    heading.setAttribute('aria-label', state.gameMode ? `${formatCategoryTitle(key)} category` : `${formatCategoryTitle(key)} category. Long press or press Enter to rename.`);
+    heading.addEventListener('pointerdown', () => {
+      if (!state.gameMode) createCategoryRenameLongPressTimer(heading, key);
+    });
     heading.addEventListener('pointerup', () => clearLongPressTimer(heading));
     heading.addEventListener('pointerleave', () => clearLongPressTimer(heading));
     heading.addEventListener('pointercancel', () => clearLongPressTimer(heading));
@@ -4074,7 +4918,7 @@ function renderBoard() {
       clearDropIndicators();
     });
     heading.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
+      if (!state.gameMode && (event.key === 'Enter' || event.key === ' ')) {
         event.preventDefault();
         openCategoryRenameEditor(key);
       }
@@ -4168,14 +5012,19 @@ function renderBoard() {
       }
 
       delete state.playlists[key];
-      tracks.forEach((track) => removeStoredAudioFile(track.audioStorageId, track));
+      tracks.forEach((track) => {
+        removeStoredAudioFile(track.audioStorageId, track);
+        removeOneDriveAudioFile(track.oneDriveItemId, track.oneDriveAccountId, track);
+      });
       delete state.categorySettings[key];
       delete state.categorySizes[key];
+      delete state.mobileCategorySizes[key];
       state.hiddenCategories.delete(key);
       state.autoplayVisited.delete(key);
       savePlaylists();
       saveCategorySettings();
       saveCategorySizes();
+      saveCategorySizes(true);
       saveHiddenCategories();
       renderBoard();
       setStatus(`Deleted category: ${categoryName}.`);
@@ -4193,7 +5042,7 @@ function renderBoard() {
       const button = document.createElement('button');
       button.className = 'track-button';
       button.type = 'button';
-      button.draggable = true;
+      button.draggable = !state.gameMode;
       button.dataset.categoryKey = key;
       button.dataset.index = String(index);
       button.innerHTML = `
@@ -4306,14 +5155,18 @@ function renderBoard() {
 
     const footerRow = document.createElement('div');
     footerRow.className = 'playlist-footer';
-    footerRow.appendChild(resetButton);
+    if (state.gameMode) {
+      headerActions.appendChild(resetButton);
+    } else {
+      footerRow.appendChild(resetButton);
+    }
     footerRow.appendChild(deleteButton);
 
     const resizeHandle = document.createElement('button');
     resizeHandle.type = 'button';
     resizeHandle.className = 'playlist-resize-handle';
     resizeHandle.setAttribute('aria-label', `Resize ${formatCategoryTitle(key)} category`);
-    resizeHandle.title = 'Drag to resize category (up to 2 wide, 10 tall); use arrow keys when focused';
+    resizeHandle.title = 'Drag to resize category (quarter-width steps, up to 2 wide and 10 tall); use arrow keys when focused';
     resizeHandle.addEventListener('pointerdown', (event) => beginCategoryCardResize(event, key, column));
     resizeHandle.addEventListener('keydown', (event) => {
       const current = categoryGrid.placement.get(key);
@@ -4340,6 +5193,9 @@ function renderBoard() {
 
   updateCategoryGridLayout();
   noVisibleCategoriesMessage.classList.toggle('hidden', visibleCategories.length > 0);
+  noVisibleCategoriesMessage.textContent = state.gameMode
+    ? 'No categories are visible. Exit game mode to choose categories.'
+    : 'All categories are hidden. Select a category above to show it.';
   renderBuiltInSoundPicker();
   renderSongOptions();
   syncTrackSpectrogram();
@@ -4462,6 +5318,11 @@ function renameCategory(categoryKey, rawName) {
     delete state.categorySizes[categoryKey];
     saveCategorySizes();
   }
+  if (Object.prototype.hasOwnProperty.call(state.mobileCategorySizes, categoryKey)) {
+    state.mobileCategorySizes[newKey] = state.mobileCategorySizes[categoryKey];
+    delete state.mobileCategorySizes[categoryKey];
+    saveCategorySizes(true);
+  }
 
   if (Object.prototype.hasOwnProperty.call(state.categorySettings, categoryKey)) {
     state.categorySettings[newKey] = state.categorySettings[categoryKey];
@@ -4501,10 +5362,14 @@ function renameCategory(categoryKey, rawName) {
   return true;
 }
 
-function stopMusicPlayback() {
+function stopAllPlayback() {
   markCurrentTrackPlayed();
   clearTrackPlaybackTimers();
   stopActiveCustomPlayback();
+  stopHornPlayback();
+  if ('speechSynthesis' in window) {
+    window.speechSynthesis.cancel();
+  }
   state.currentTrack = null;
   state.currentCategoryKey = null;
   state.currentTrackIndex = -1;
@@ -4515,7 +5380,7 @@ function stopMusicPlayback() {
   state.pendingFadeInSeconds = 0;
   rampPlaybackGain(1, 0);
   renderBoard();
-  setStatus('Music stopped. Select a song to start playback.');
+  setStatus('Playback stopped. Select a song to start playback.');
 }
 
 function togglePause() {
@@ -4574,9 +5439,6 @@ function resumeForCategoryPlayback() {
   state.currentTrackStartedAt = state.currentTrack ? performance.now() : 0;
   if (activeHornAudio?.paused) {
     activeHornAudio.play().catch(() => {});
-  }
-  if (audioContext.state === 'suspended') {
-    audioContext.resume().catch(() => {});
   }
 }
 
@@ -4720,8 +5582,8 @@ function handleLocalMp3Selection(event) {
     return;
   }
 
-  if (!file.name.toLowerCase().endsWith('.mp3') && !file.type.includes('mpeg')) {
-    setStatus('Please choose an MP3 file.');
+  if (!isAudioFile(file)) {
+    setStatus('Please choose an audio file in a format supported by your browser.');
     return;
   }
 
@@ -4740,7 +5602,7 @@ function handleLocalMp3Selection(event) {
   };
   customAudio.src = objectUrl;
   customAudio.muted = state.isMuted;
-  setStatus(`Loaded local MP3: ${file.name}`);
+  setStatus(`Loaded local audio: ${file.name}`);
 }
 
 async function addLocalMp3ToCategory() {
@@ -4751,30 +5613,37 @@ async function addLocalMp3ToCategory() {
     return;
   }
   if (!file) {
-    setStatus('Choose an MP3 file first.');
+    setStatus('Choose an audio file first.');
     localAudioInput.click();
     return;
   }
 
-  const storageId = createLocalAudioStorageId();
-  const name = overrides.name || file.name.replace(/\.mp3$/i, '').trim() || 'Local MP3';
+  const name = overrides.name || file.name.replace(/\.[^.]+$/, '').trim() || 'Local audio';
   const durationSeconds = getDefaultStopTime();
   const createdCategory = !state.playlists[categoryKey];
-  const track = {
-    name,
-    description: overrides.description || 'Local MP3',
-    mood: 'custom',
-    startTime: overrides.startTime,
-    stopTime: overrides.stopTime ?? durationSeconds,
-    durationSeconds,
-    played: false,
-    audioStorageId: storageId
-  };
+  let audioUrl = '';
+  let oneDriveFile = null;
 
   addLocalMp3Button.disabled = true;
   setStatus(`Saving ${file.name}...`);
   try {
-    await saveLocalAudioFile(storageId, file);
+    if (storeAudioInOneDriveInput.checked) {
+      oneDriveFile = await window.SoundboardOneDrive.uploadAudio(file);
+    } else {
+      audioUrl = await uploadSharedAudio(file);
+    }
+    const track = {
+      name,
+      description: overrides.description || 'Local audio',
+      mood: 'custom',
+      startTime: overrides.startTime,
+      stopTime: overrides.stopTime ?? durationSeconds,
+      durationSeconds,
+      played: false,
+      audioUrl,
+      oneDriveItemId: oneDriveFile?.itemId || '',
+      oneDriveAccountId: oneDriveFile?.accountId || ''
+    };
     ensureImportCategory(categoryKey);
     state.playlists[categoryKey].push(track);
     try {
@@ -4784,13 +5653,12 @@ async function addLocalMp3ToCategory() {
       if (createdCategory) {
         delete state.playlists[categoryKey];
       }
-      throw new Error('Unable to save the MP3 entry in browser storage.');
+      throw new Error('Unable to save the audio entry in browser storage.');
     }
 
     const objectUrl = state.customType === 'file' && state.customSource?.startsWith('blob:')
       ? state.customSource
       : URL.createObjectURL(file);
-    state.localAudioObjectUrls.set(storageId, objectUrl);
     customAudio.src = objectUrl;
     state.customSource = objectUrl;
     state.customType = 'file';
@@ -4800,9 +5668,17 @@ async function addLocalMp3ToCategory() {
     state.pendingMp3File = null;
     clearMusicOverrides();
     setStatus(`Added "${name}" to ${formatCategoryTitle(categoryKey)}.`);
+    if (audioUrl) loadSharedAudio();
   } catch (error) {
-    await deleteLocalAudioFile(storageId).catch(() => {});
-    setStatus(error.message || 'Unable to store this MP3 in browser storage.');
+    if (oneDriveFile) {
+      try {
+        await window.SoundboardOneDrive.deleteAudio(oneDriveFile.itemId, oneDriveFile.accountId);
+      } catch (cleanupError) {
+        setStatus(`${error.message || 'Unable to save this audio.'} The uploaded OneDrive file may need to be removed manually.`);
+        return;
+      }
+    }
+    setStatus(`${error.message || 'Unable to store this audio.'}${audioUrl ? ' The audio remains in the shared library.' : ''}`);
   } finally {
     addLocalMp3Button.disabled = !state.pendingMp3File;
   }
@@ -4915,10 +5791,8 @@ async function addYouTubeToCategory() {
 }
 
 pauseToggleButton.addEventListener('click', togglePause);
-document.getElementById('stopPlayback').addEventListener('click', stopMusicPlayback);
-enterFullscreenButton.addEventListener('click', enterFullscreen);
-exitFullscreenButton.addEventListener('click', exitFullscreen);
-document.addEventListener('fullscreenchange', syncFullscreenButtons);
+document.getElementById('stopPlayback').addEventListener('click', stopAllPlayback);
+gameModeToggleButton.addEventListener('click', toggleGameMode);
 scoreButton.addEventListener('click', openScoreDialog);
 scoreTeamsButton.addEventListener('click', openScoreTeamsDialog);
 saveScoreTeamsButton.addEventListener('click', saveScoreTeams);
@@ -4979,11 +5853,51 @@ settingsPanel.addEventListener('keydown', (event) => {
   }
 });
 musicLibraryToggleButton.addEventListener('click', toggleMusicLibrary);
+document.body.appendChild(musicLibraryDialog);
+document.getElementById('musicLibraryClose').addEventListener('click', toggleMusicLibrary);
+musicLibraryDialog.addEventListener('click', (event) => {
+  if (event.target === musicLibraryDialog) toggleMusicLibrary();
+});
+musicLibraryDialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    toggleMusicLibrary();
+  } else if (event.key === 'Tab') {
+    const focusable = Array.from(musicLibraryDialog.querySelectorAll('button, input, select, a[href]'))
+      .filter((element) => !element.disabled && element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  }
+});
+addSharedAudioButton.addEventListener('click', addSharedAudioToCategory);
+sharedPlaylistSelect.addEventListener('change', loadSelectedSharedPlaylist);
+sharedPlaylistSong.addEventListener('change', () => {
+  addSharedPlaylistSongButton.disabled = sharedPlaylistSong.value === '';
+});
+addSharedPlaylistButton.addEventListener('click', addSelectedSharedPlaylist);
+addSharedPlaylistSongButton.addEventListener('click', addSelectedSharedPlaylistSong);
+offlinePlaylistSelect.addEventListener('change', checkOfflinePlaylist);
+checkOfflinePlaylistButton.addEventListener('click', checkOfflinePlaylist);
+downloadOfflinePlaylistButton.addEventListener('click', downloadOfflinePlaylist);
+removeOfflineDownloadsButton.addEventListener('click', removeOfflineDownloads);
 builtInSoundToggleButton.addEventListener('click', toggleBuiltInSounds);
 useLocalMp3Input.addEventListener('change', syncMusicSourceVisibility);
 offlineModeToggleInput.addEventListener('change', toggleOfflineMode);
-window.addEventListener('online', syncOfflineModeViews);
-window.addEventListener('offline', syncOfflineModeViews);
+window.addEventListener('online', () => {
+  syncOfflineModeViews();
+  renderOfflinePlaylistControls();
+});
+window.addEventListener('offline', () => {
+  syncOfflineModeViews();
+  renderOfflinePlaylistControls();
+});
 applySettingsButton.addEventListener('click', applyBrandSettings);
 logoFileInput.addEventListener('change', handleLogoFileSelection);
 hornFileInput.addEventListener('change', handleHornFileSelection);
@@ -5003,6 +5917,15 @@ builtInHornSelect.addEventListener('change', () => {
 localAudioInput.addEventListener('change', handleLocalMp3Selection);
 playlistSpreadsheetInput.addEventListener('change', handleSpreadsheetUpload);
 addLocalMp3Button.addEventListener('click', addLocalMp3ToCategory);
+oneDriveConnectButton.addEventListener('click', connectOneDrive);
+oneDriveDisconnectButton.addEventListener('click', disconnectOneDrive);
+storeAudioInOneDriveInput.addEventListener('change', () => {
+  state.settings.storeAudioInOneDrive = storeAudioInOneDriveInput.checked;
+  saveSettings();
+  setStatus(storeAudioInOneDriveInput.checked
+    ? 'New audio will be stored in your OneDrive app folder.'
+    : 'New audio will be stored in this browser.');
+});
 addMusicButton.addEventListener('click', addOnlineMusic);
 addCategoryButton.addEventListener('click', addCategory);
 downloadSpreadsheetExampleButton.addEventListener('click', downloadSpreadsheetExample);
@@ -5090,6 +6013,7 @@ customHornOption.disabled = !state.settings.customHornDataUrl;
 watermarkVisibleInput.checked = state.settings.watermarkVisible;
 headerLogoUrlInput.value = state.settings.headerLogoUrl;
 watermarkOpacityInput.value = String(state.settings.watermarkOpacity);
+storeAudioInOneDriveInput.checked = state.settings.storeAudioInOneDrive;
 applySoundboardTitle();
 spotifyRedirectUriInput.addEventListener('change', () => {
   const value = spotifyRedirectUriInput.value.trim();
@@ -5143,10 +6067,26 @@ document.addEventListener('integrations-changed', () => {
   setStatus('Integration settings updated. Saved songs and credentials were kept.');
 });
 
+async function initializeOfflineInventory() {
+  if (offlineOperation) return;
+  try {
+    await refreshOfflineInventory();
+  } catch (error) {
+    console.error('Could not inspect offline audio storage.', error);
+    offlineInventoryReady = false;
+    offlineInventoryError = error.message || 'Reload the app and try again.';
+  }
+  renderBoard();
+}
+
 renderBoard();
 syncOfflineModeViews();
-syncFullscreenButtons();
 registerServiceWorker();
+initializeOfflineInventory();
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.ready.then(initializeOfflineInventory);
+  navigator.serviceWorker.addEventListener('controllerchange', initializeOfflineInventory);
+}
 handleSpotifyCallback();
 
 window.addEventListener('pointerdown', () => {

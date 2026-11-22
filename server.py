@@ -3,6 +3,7 @@
 Run:  python server.py [port]        (default port 8000)
 Env:  SOUNDBOARD_HOST   bind address (default 0.0.0.0 so other devices can log in)
       SOUNDBOARD_INVITE if set, new accounts must supply this invite code
+      SOUNDBOARD_ONEDRIVE_CLIENT_ID for optional OneDrive audio storage
       SOUNDBOARD_PUBLIC_URL, SOUNDBOARD_EMAIL_PROVIDER
       Microsoft Graph settings: SOUNDBOARD_GRAPH_CLIENT_ID,
       SMTP settings: SOUNDBOARD_SMTP_HOST, SOUNDBOARD_SMTP_FROM,
@@ -14,6 +15,7 @@ Run `python server.py --authorize-email` once to authorize a Microsoft Graph mai
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import secrets
@@ -26,11 +28,13 @@ import time
 import urllib.error
 import urllib.request
 from email.message import EmailMessage
+from functools import lru_cache
 from http import cookies
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse, urlsplit
+from urllib.parse import parse_qs, unquote, urlencode, urlparse, urlsplit
 
 import msal
+import mutagen
 from apple_music import AppleMusicConfigurationError, create_developer_token
 from integrations import public_config, read_config, track_enabled, validate_update
 
@@ -38,9 +42,21 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 # On Azure App Service (Linux) only /home persists across restarts and deployments.
 DEFAULT_DATA_DIR = '/home/data' if os.environ.get('WEBSITE_SITE_NAME') else ROOT
 DB_PATH = os.environ.get('SOUNDBOARD_DB') or os.path.join(DEFAULT_DATA_DIR, 'soundboard-users.db')
+UPLOADS_DIR = os.environ.get('SOUNDBOARD_UPLOAD_DIR') or os.path.join(os.path.dirname(DB_PATH), 'uploads')
 SESSION_COOKIE = 'hs_session'
 SESSION_SECONDS = 30 * 24 * 3600
 MAX_BODY = 12 * 1024 * 1024
+MAX_AUDIO_UPLOAD = 60 * 1024 * 1024
+AUDIO_EXTENSIONS = {'.mp3', '.m4a', '.m4b', '.aac', '.wav', '.wave', '.ogg', '.oga',
+                    '.opus', '.webm', '.flac', '.aif', '.aiff', '.aifc', '.amr', '.3gp'}
+AUDIO_CONTENT_TYPES = {
+    '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.m4b': 'audio/mp4',
+    '.aac': 'audio/aac', '.wav': 'audio/wav', '.wave': 'audio/wav',
+    '.ogg': 'audio/ogg', '.oga': 'audio/ogg', '.opus': 'audio/ogg',
+    '.webm': 'audio/webm', '.flac': 'audio/flac', '.aif': 'audio/aiff',
+    '.aiff': 'audio/aiff', '.aifc': 'audio/aiff', '.amr': 'audio/amr',
+    '.3gp': 'audio/3gpp',
+}
 DEFAULT_ADMIN_USERNAME = 'admin'
 DEFAULT_ADMIN_PASSWORD = os.environ.get('SOUNDBOARD_ADMIN_PASSWORD') or 'admin'
 USERNAME_RE = re.compile(r'^[A-Za-z0-9_.-]{3,32}$')
@@ -62,8 +78,10 @@ GRAPH_SCOPES = ['https://graph.microsoft.com/Mail.Send']
 
 
 MAX_SHARED_TRACKS = 500
-SHARED_TEXT_FIELDS = {'name': 120, 'description': 300, 'mood': 40}
-SHARED_URL_FIELDS = ('spotifyUrl', 'youtubeUrl', 'youtubeEmbedUrl', 'appleMusicUrl')
+IMPORTED_PLAYLIST_PREFIX = 'imported-csv-20261102-'
+MANAGED_CATEGORY_MIGRATION_KEY = 'managed_local_categories_initialized'
+SHARED_TEXT_FIELDS = {'name': 160, 'description': 300, 'mood': 40}
+SHARED_URL_FIELDS = ('spotifyUrl', 'youtubeUrl', 'youtubeEmbedUrl', 'appleMusicUrl', 'audioUrl')
 
 
 def sanitize_shared_track(track):
@@ -75,7 +93,10 @@ def sanitize_shared_track(track):
         clean[field] = value.strip()[:limit] if isinstance(value, str) else ''
     for field in SHARED_URL_FIELDS:
         value = track.get(field)
-        clean[field] = value[:500] if isinstance(value, str) and value.lower().startswith(('https://', 'http://')) else ''
+        clean[field] = value[:500] if isinstance(value, str) and (
+            value.lower().startswith(('https://', 'http://')) or
+            (field == 'audioUrl' and re.fullmatch(r'/api/shared-audio/[a-f0-9]{32}', value))
+        ) else ''
     audio = track.get('audioDataUrl')
     clean['audioDataUrl'] = audio if isinstance(audio, str) and audio.lower().startswith('data:audio/') else ''
     for field in ('startTime', 'stopTime', 'durationSeconds'):
@@ -83,9 +104,22 @@ def sanitize_shared_track(track):
             clean[field] = max(0, int(track.get(field) or 0))
         except (TypeError, ValueError):
             clean[field] = 0
-    if not clean['name'] or not (clean['spotifyUrl'] or clean['youtubeUrl'] or clean['appleMusicUrl'] or clean['audioDataUrl']):
+    clean['repeatable'] = track.get('repeatable') is True
+    version = track.get('sharedAudioNameVersion')
+    if isinstance(version, int) and not isinstance(version, bool) and version > 0:
+        clean['sharedAudioNameVersion'] = version
+    if not clean['name'] or not (clean['spotifyUrl'] or clean['youtubeUrl'] or clean['appleMusicUrl'] or clean['audioDataUrl'] or clean['audioUrl']):
         return None
     return clean
+
+
+@lru_cache(maxsize=4096)
+def read_audio_duration(path, size, modified_ns):
+    audio = mutagen.File(path)
+    if audio is None or not getattr(audio, 'info', None):
+        return None
+    duration = float(audio.info.length)
+    return duration if math.isfinite(duration) and duration > 0 else None
 
 
 DEFAULT_BOARD_CONFIG_KEY = 'default_board'
@@ -93,9 +127,83 @@ DEFAULT_BOARD_PLAYLISTS_KEY = 'hockey-soundboard-playlists-v1'
 DEFAULT_BOARD_KEYS = (
     DEFAULT_BOARD_PLAYLISTS_KEY,
     'hockey-soundboard-category-grid-v2',
+    'hockey-soundboard-category-grid-mobile-v1',
     'hockey-soundboard-category-settings-v1',
     'hockey-soundboard-hidden-categories-v1',
 )
+
+def shared_audio_renames(conn):
+    rows = conn.execute(
+        'SELECT a.id, a.name, v.version FROM shared_audio_name_versions v '
+        'JOIN shared_audio a ON a.id = v.audio_id'
+    ).fetchall()
+    return {'/api/shared-audio/' + row['id']: (row['name'], row['version']) for row in rows}
+
+
+def apply_shared_audio_renames(tracks, renames):
+    if not isinstance(tracks, list):
+        raise ValueError('Invalid saved playlist tracks.')
+    changed = False
+    for track in tracks:
+        if not isinstance(track, dict):
+            raise ValueError('Invalid saved playlist track.')
+        audio_url = track.get('audioUrl')
+        rename = renames.get(audio_url) if isinstance(audio_url, str) else None
+        if rename:
+            name, version = rename
+            if track.get('sharedAudioNameVersion') != version:
+                track['name'] = name
+                track['sharedAudioNameVersion'] = version
+                changed = True
+    return changed
+
+
+def rename_playlist_data(value, renames):
+    playlists = json.loads(value)
+    if not isinstance(playlists, dict):
+        raise ValueError('Invalid saved playlists.')
+    changed = False
+    for tracks in playlists.values():
+        if tracks is None:
+            continue
+        changed = apply_shared_audio_renames(tracks, renames) or changed
+    return json.dumps(playlists, ensure_ascii=False) if changed else value
+
+
+def rename_saved_song_references(conn, track_id, name, version):
+    renames = {'/api/shared-audio/' + track_id: (name, version)}
+    updated_categories = []
+    rows = conn.execute('SELECT id, tracks, updated FROM shared_categories WHERE instr(tracks, ?) > 0', (track_id,)).fetchall()
+    for row in rows:
+        tracks = json.loads(row['tracks'])
+        if apply_shared_audio_renames(tracks, renames):
+            updated = max(time.time(), row['updated'] + 0.000001)
+            conn.execute('UPDATE shared_categories SET tracks = ?, updated = ? WHERE id = ?',
+                         (json.dumps(tracks, ensure_ascii=False), updated, row['id']))
+            updated_categories.append({'id': row['id'], 'previousUpdated': row['updated'], 'updated': updated})
+    rows = conn.execute('SELECT user_id, value FROM user_data WHERE key = ? AND instr(value, ?) > 0',
+                        (DEFAULT_BOARD_PLAYLISTS_KEY, track_id)).fetchall()
+    for row in rows:
+        value = rename_playlist_data(row['value'], renames)
+        if value != row['value']:
+            conn.execute('UPDATE user_data SET value = ? WHERE user_id = ? AND key = ?',
+                         (value, row['user_id'], DEFAULT_BOARD_PLAYLISTS_KEY))
+    row = conn.execute('SELECT value FROM app_config WHERE key = ? AND instr(value, ?) > 0',
+                       (DEFAULT_BOARD_CONFIG_KEY, track_id)).fetchone()
+    if row:
+        board = json.loads(row['value'])
+        if not isinstance(board, dict) or not isinstance(board.get('data'), dict):
+            raise ValueError('Invalid saved default board.')
+        data = board['data']
+        value = data.get(DEFAULT_BOARD_PLAYLISTS_KEY)
+        if not isinstance(value, str):
+            raise ValueError('Invalid saved default playlists.')
+        renamed = rename_playlist_data(value, renames)
+        if renamed != value:
+            data[DEFAULT_BOARD_PLAYLISTS_KEY] = renamed
+            conn.execute('UPDATE app_config SET value = ? WHERE key = ?',
+                         (json.dumps(board, ensure_ascii=False), DEFAULT_BOARD_CONFIG_KEY))
+    return updated_categories
 
 
 def build_default_board(conn, user_id):
@@ -110,6 +218,12 @@ def build_default_board(conn, user_id):
         playlists = None
     if not isinstance(playlists, dict) or not playlists:
         raise ValueError('This account has no saved categories to use as the default.')
+    for category_key, tracks in playlists.items():
+        if isinstance(tracks, list):
+            playlists[category_key] = [
+                track for track in tracks
+                if not isinstance(track, dict) or not (track.get('audioStorageId') or track.get('oneDriveItemId'))
+            ]
     for tracks in playlists.values():
         for track in tracks if isinstance(tracks, list) else []:
             if isinstance(track, dict):
@@ -202,6 +316,21 @@ def init_db():
                 updated REAL NOT NULL,
                 UNIQUE (owner_id, key)
             );
+            CREATE TABLE IF NOT EXISTS shared_audio (
+                id TEXT PRIMARY KEY,
+                file_name TEXT NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                category TEXT NOT NULL DEFAULT '',
+                created REAL NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS shared_audio_name_versions (
+                audio_id TEXT PRIMARY KEY REFERENCES shared_audio(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS managed_local_categories (
+                category_id INTEGER PRIMARY KEY REFERENCES shared_categories(id) ON DELETE CASCADE
+            );
             CREATE TABLE IF NOT EXISTS password_resets (
                 token_hash TEXT PRIMARY KEY,
                 user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -221,6 +350,9 @@ def init_db():
             conn.execute('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0')
         if 'is_admin' not in columns:
             conn.execute('ALTER TABLE users ADD COLUMN is_admin INTEGER NOT NULL DEFAULT 0')
+        audio_columns = {row['name'] for row in conn.execute('PRAGMA table_info(shared_audio)')}
+        if 'description' not in audio_columns:
+            conn.execute("ALTER TABLE shared_audio ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS users_email_unique ON users(email)')
         if not conn.execute('SELECT 1 FROM users WHERE username = ?', (DEFAULT_ADMIN_USERNAME,)).fetchone():
             salt = secrets.token_bytes(16)
@@ -228,6 +360,14 @@ def init_db():
                 'INSERT INTO users (username, salt, hash, email, is_admin, created) VALUES (?, ?, ?, NULL, 1, ?)',
                 (DEFAULT_ADMIN_USERNAME, salt, hash_password(DEFAULT_ADMIN_PASSWORD, salt), time.time())
             )
+        if not conn.execute('SELECT 1 FROM app_config WHERE key = ?', (MANAGED_CATEGORY_MIGRATION_KEY,)).fetchone():
+            conn.execute(
+                'INSERT OR IGNORE INTO managed_local_categories (category_id) '
+                'SELECT c.id FROM shared_categories c JOIN users u ON u.id = c.owner_id '
+                'WHERE substr(c.key, 1, ?) = ? AND u.is_admin = 1',
+                (len(IMPORTED_PLAYLIST_PREFIX), IMPORTED_PLAYLIST_PREFIX)
+            )
+            conn.execute('INSERT INTO app_config (key, value) VALUES (?, ?)', (MANAGED_CATEGORY_MIGRATION_KEY, '1'))
 
 
 def hash_password(password, salt):
@@ -407,15 +547,24 @@ class Handler(SimpleHTTPRequestHandler):
     # ---------- routing ----------
     def do_GET(self):
         path = urlparse(self.path).path
-        if path.startswith('/api/'):
+        static_path = os.path.normpath(unquote(path)).replace('\\', '/')
+        if path.startswith('/api/shared-audio/'):
+            self.api_get_shared_audio(path)
+        elif path.startswith('/api/'):
             self.handle_api('GET', path)
+        elif static_path == '/uploads' or static_path.startswith('/uploads/'):
+            self.send_error(404)
         elif os.path.basename(path.rstrip('/')).lower() in PRIVATE_FILES:
             self.send_error(404)
         else:
             super().do_GET()
 
     def do_HEAD(self):
-        if os.path.basename(urlparse(self.path).path.rstrip('/')).lower() in PRIVATE_FILES:
+        path = urlparse(self.path).path
+        static_path = os.path.normpath(unquote(path)).replace('\\', '/')
+        if path.startswith('/api/shared-audio/'):
+            self.api_get_shared_audio(path, head=True)
+        elif static_path == '/uploads' or static_path.startswith('/uploads/') or os.path.basename(path.rstrip('/')).lower() in PRIVATE_FILES:
             self.send_error(404)
         else:
             super().do_HEAD()
@@ -457,6 +606,14 @@ class Handler(SimpleHTTPRequestHandler):
             ('GET', '/api/google-sheet'): self.api_google_sheet,
             ('GET', '/api/data'): self.api_get_data,
             ('PUT', '/api/data'): self.api_put_data,
+            ('GET', '/api/shared-audio'): self.api_list_shared_audio,
+            ('GET', '/api/shared-audio-renames'): self.api_shared_audio_renames,
+            ('POST', '/api/shared-audio'): self.api_upload_shared_audio,
+            ('GET', '/api/local-song-management'): self.api_local_song_management,
+            ('PUT', '/api/admin/local-song'): self.api_update_local_song,
+            ('POST', '/api/admin/local-song/delete'): self.api_delete_local_song,
+            ('POST', '/api/admin/local-categories'): self.api_create_local_category,
+            ('PUT', '/api/admin/local-categories'): self.api_update_local_category,
         }
         route = routes.get((method, path))
         if route is None:
@@ -465,6 +622,369 @@ class Handler(SimpleHTTPRequestHandler):
         route()
 
     # ---------- endpoints ----------
+    def api_list_shared_audio(self):
+        if not self.current_user():
+            self.send_json(401, {'error': 'Not logged in'})
+            return
+        with db_lock, get_db() as conn:
+            rows = conn.execute(
+                'SELECT a.id, a.name, a.category, v.version FROM shared_audio a '
+                'LEFT JOIN shared_audio_name_versions v ON v.audio_id = a.id '
+                'ORDER BY a.category COLLATE NOCASE, a.name COLLATE NOCASE, a.id'
+            ).fetchall()
+        self.send_json(200, {'tracks': [
+            {'id': row['id'], 'name': row['name'], 'category': row['category'], 'url': '/api/shared-audio/' + row['id'],
+             'nameVersion': row['version'] or 0}
+            for row in rows
+        ]})
+
+    def api_shared_audio_renames(self):
+        if not self.current_user():
+            self.send_json(401, {'error': 'Not logged in'})
+            return
+        with db_lock, get_db() as conn:
+            renames = shared_audio_renames(conn)
+        self.send_json(200, {'renames': [
+            {'id': url.rsplit('/', 1)[-1], 'name': name, 'version': version}
+            for url, (name, version) in renames.items()
+        ]})
+
+    def api_upload_shared_audio(self):
+        if not self.require_admin():
+            return
+        origin = self.headers.get('Origin')
+        if origin and urlparse(origin).netloc != self.headers.get('Host'):
+            self.send_json(403, {'error': 'Invalid request origin.'})
+            return
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+        except ValueError:
+            length = 0
+        if length <= 0 or length > MAX_AUDIO_UPLOAD:
+            self.send_json(400, {'error': 'Audio must be between 1 byte and 60 MB.'})
+            return
+        name = os.path.basename(parse_qs(urlparse(self.path).query).get('name', [''])[0].replace('\\', '/'))
+        extension = os.path.splitext(name)[1].lower()
+        if extension not in AUDIO_EXTENSIONS:
+            self.send_json(400, {'error': 'Unsupported audio file format.'})
+            return
+        track_id = secrets.token_hex(16)
+        file_name = track_id + extension
+        path = os.path.join(UPLOADS_DIR, file_name)
+        created = False
+        try:
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+            with open(path, 'xb') as output:
+                created = True
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(remaining, 1024 * 1024))
+                    if not chunk:
+                        raise OSError('Incomplete audio upload.')
+                    output.write(chunk)
+                    remaining -= len(chunk)
+            with db_lock, get_db() as conn:
+                conn.execute('INSERT INTO shared_audio (id, file_name, name, category, created) VALUES (?, ?, ?, ?, ?)',
+                             (track_id, file_name, os.path.splitext(name)[0][:160] or 'Untitled', '', time.time()))
+        except (OSError, sqlite3.Error) as error:
+            if created:
+                try:
+                    os.remove(path)
+                except OSError as cleanup_error:
+                    self.log_error('Could not clean up failed audio upload: %s', cleanup_error)
+            self.log_error('Audio upload failed: %s', error)
+            self.send_json(500, {'error': 'Could not save audio to app storage.'})
+            return
+        self.send_json(201, {'id': track_id, 'url': '/api/shared-audio/' + track_id})
+
+    def api_local_song_management(self):
+        if not self.current_user():
+            self.send_json(401, {'error': 'Not logged in'})
+            return
+        with db_lock, get_db() as conn:
+            rows = conn.execute(
+                'SELECT a.id, a.file_name, a.name, a.description, v.version FROM shared_audio a '
+                'LEFT JOIN shared_audio_name_versions v ON v.audio_id = a.id ORDER BY a.name COLLATE NOCASE, a.id'
+            ).fetchall()
+            categories = conn.execute(
+                'SELECT c.id, c.name, c.tracks, c.updated FROM shared_categories c '
+                'JOIN managed_local_categories m ON m.category_id = c.id ORDER BY c.name COLLATE NOCASE, c.id'
+            ).fetchall()
+        songs = []
+        for row in rows:
+            duration = None
+            available = False
+            filename = row['file_name']
+            if re.fullmatch(r'[a-f0-9]{32}\.[a-z0-9]{1,10}', filename):
+                path = os.path.join(UPLOADS_DIR, filename)
+                try:
+                    stat = os.stat(path)
+                    available = True
+                    duration = read_audio_duration(path, stat.st_size, stat.st_mtime_ns)
+                except (OSError, mutagen.MutagenError, TypeError, ValueError, OverflowError) as error:
+                    self.log_error('Could not read local audio metadata for %s: %s', row['id'], error)
+            if not available:
+                self.log_error('Shared audio file is missing or invalid for %s', row['id'])
+            songs.append({
+                'id': row['id'], 'name': row['name'], 'description': row['description'], 'nameVersion': row['version'] or 0,
+                'audioUrl': '/api/shared-audio/' + row['id'],
+                'durationSeconds': duration, 'available': available
+            })
+        self.send_json(200, {
+            'songs': songs,
+            'categories': [{'id': row['id'], 'name': row['name'], 'tracks': json.loads(row['tracks']),
+                            'updated': row['updated']} for row in categories]
+        })
+
+    def api_update_local_song(self):
+        if not self.require_admin():
+            return
+        body = self.read_json()
+        track_id = body.get('id') if body else None
+        name = body.get('name') if body else None
+        description = body.get('description') if body else None
+        old_name = body.get('previousName') if body else None
+        old_description = body.get('previousDescription') if body else None
+        if (not isinstance(track_id, str) or not re.fullmatch(r'[a-f0-9]{32}', track_id)
+                or not isinstance(name, str) or not name.strip() or len(name.strip()) > 160
+                or not isinstance(description, str) or len(description.strip()) > 300
+                or not isinstance(old_name, str) or not isinstance(old_description, str)):
+            self.send_json(400, {'error': 'Invalid song details.'})
+            return
+        try:
+            with db_lock, get_db() as conn:
+                existing = conn.execute('SELECT name, description FROM shared_audio WHERE id = ?', (track_id,)).fetchone()
+                if not existing:
+                    self.send_json(404, {'error': 'That shared song no longer exists.'})
+                    return
+                if existing['name'] != old_name or existing['description'] != old_description:
+                    self.send_json(409, {'error': 'The song changed elsewhere. Reload before editing it.'})
+                    return
+                conn.execute('UPDATE shared_audio SET name = ?, description = ? WHERE id = ?',
+                             (name.strip(), description.strip(), track_id))
+                updated_categories = []
+                if name.strip() != existing['name']:
+                    conn.execute(
+                        'INSERT INTO shared_audio_name_versions (audio_id, version) VALUES (?, 1) '
+                        'ON CONFLICT(audio_id) DO UPDATE SET version = version + 1', (track_id,)
+                    )
+                    version = conn.execute('SELECT version FROM shared_audio_name_versions WHERE audio_id = ?',
+                                           (track_id,)).fetchone()['version']
+                    updated_categories = rename_saved_song_references(conn, track_id, name.strip(), version)
+                else:
+                    row = conn.execute('SELECT version FROM shared_audio_name_versions WHERE audio_id = ?',
+                                       (track_id,)).fetchone()
+                    version = row['version'] if row else 0
+        except (sqlite3.Error, ValueError, TypeError) as error:
+            self.log_error('Could not rename shared audio %s: %s', track_id, error)
+            self.send_json(500, {'error': 'Could not update all playlists; the song was not changed. Contact an administrator.'})
+            return
+        self.send_json(200, {'ok': True, 'name': name.strip(), 'description': description.strip(),
+                             'nameVersion': version, 'updatedCategories': updated_categories})
+
+    def api_delete_local_song(self):
+        if not self.require_admin():
+            return
+        body = self.read_json()
+        track_id = body.get('id') if body else None
+        if not isinstance(track_id, str) or not re.fullmatch(r'[a-f0-9]{32}', track_id):
+            self.send_json(400, {'error': 'Invalid song.'})
+            return
+        path = staged = None
+        with db_lock:
+            try:
+                with get_db() as conn:
+                    conn.execute('BEGIN IMMEDIATE')
+                    row = conn.execute('SELECT file_name FROM shared_audio WHERE id = ?', (track_id,)).fetchone()
+                    if not row:
+                        self.send_json(404, {'error': 'That shared song no longer exists.'})
+                        return
+                    in_use = any(conn.execute(query, (track_id,)).fetchone() for query in (
+                        'SELECT 1 FROM shared_categories WHERE instr(tracks, ?) > 0 LIMIT 1',
+                        'SELECT 1 FROM user_data WHERE instr(value, ?) > 0 LIMIT 1',
+                        'SELECT 1 FROM app_config WHERE instr(value, ?) > 0 LIMIT 1',
+                    ))
+                    if in_use:
+                        self.send_json(409, {'error': 'This song is used by a shared category, personal board, or saved default. Remove those references before deleting it.'})
+                        return
+                    filename = row['file_name']
+                    if not re.fullmatch(re.escape(track_id) + r'\.[a-z0-9]{1,10}', filename):
+                        self.log_error('Invalid stored filename for shared audio %s', track_id)
+                        self.send_json(500, {'error': 'The stored audio filename is invalid; the song was not deleted.'})
+                        return
+                    path = os.path.join(UPLOADS_DIR, filename)
+                    staged = path + '.deleting-' + secrets.token_hex(16)
+                    try:
+                        os.rename(path, staged)
+                    except FileNotFoundError:
+                        staged = None
+                    conn.execute('DELETE FROM shared_audio_name_versions WHERE audio_id = ?', (track_id,))
+                    conn.execute('DELETE FROM shared_audio WHERE id = ?', (track_id,))
+            except (OSError, sqlite3.Error) as error:
+                if staged and os.path.exists(staged):
+                    try:
+                        os.rename(staged, path)
+                    except OSError as restore_error:
+                        self.log_error('Could not restore shared audio %s after delete failure: %s', track_id, restore_error)
+                        self.send_json(500, {'error': 'The delete failed and the stored file could not be restored. Contact an administrator.'})
+                        return
+                self.log_error('Could not delete shared audio %s: %s', track_id, error)
+                self.send_json(500, {'error': 'Could not delete the song; its library entry was retained.'})
+                return
+            if staged:
+                try:
+                    os.remove(staged)
+                except OSError as error:
+                    self.log_error('Could not remove deleted shared audio file %s: %s', track_id, error)
+                    self.send_json(200, {'ok': True, 'warning': 'The song was removed from the library, but its stored file could not be removed. Contact an administrator.'})
+                    return
+        self.send_json(200, {'ok': True})
+
+    def api_create_local_category(self):
+        user = self.require_admin()
+        if not user:
+            return
+        body = self.read_json()
+        name = body.get('name') if body else None
+        if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+            self.send_json(400, {'error': 'Enter a category name of at most 100 characters.'})
+            return
+        name = name.strip()
+        updated = time.time()
+        with db_lock, get_db() as conn:
+            if conn.execute(
+                'SELECT 1 FROM shared_categories c JOIN managed_local_categories m ON m.category_id = c.id '
+                'WHERE c.name = ? COLLATE NOCASE', (name,)
+            ).fetchone():
+                self.send_json(409, {'error': 'A managed category already has that name.'})
+                return
+            cursor = conn.execute(
+                'INSERT INTO shared_categories (owner_id, key, name, tracks, updated) VALUES (?, ?, ?, ?, ?)',
+                (user['id'], 'managed-local-' + secrets.token_hex(16), name, '[]', updated)
+            )
+            conn.execute('INSERT INTO managed_local_categories (category_id) VALUES (?)', (cursor.lastrowid,))
+        self.send_json(201, {'id': cursor.lastrowid, 'name': name, 'tracks': [], 'updated': updated})
+
+    def api_update_local_category(self):
+        if not self.require_admin():
+            return
+        body = self.read_json()
+        category_id = body.get('id') if body else None
+        updated = body.get('updated') if body else None
+        tracks = body.get('tracks') if body else None
+        if (not isinstance(category_id, int) or isinstance(category_id, bool)
+                or not isinstance(updated, (int, float)) or isinstance(updated, bool)
+                or (isinstance(updated, float) and not math.isfinite(updated))
+                or not isinstance(tracks, list) or len(tracks) > MAX_SHARED_TRACKS):
+            self.send_json(400, {'error': 'Invalid category update.'})
+            return
+        clean = []
+        ids = set()
+        for track in tracks:
+            if not isinstance(track, dict):
+                self.send_json(400, {'error': 'Invalid song in category.'})
+                return
+            name, description = track.get('name'), track.get('description', '')
+            audio_url = track.get('audioUrl')
+            start, stop, duration = (track.get(key, 0) for key in ('startTime', 'stopTime', 'durationSeconds'))
+            if (not isinstance(name, str) or not name.strip() or len(name.strip()) > 160
+                    or not isinstance(description, str) or len(description.strip()) > 300
+                    or not isinstance(audio_url, str) or not re.fullmatch(r'/api/shared-audio/[a-f0-9]{32}', audio_url)
+                    or any(not isinstance(value, int) or isinstance(value, bool) or value < 0
+                           for value in (start, stop, duration))
+                    or (stop and stop <= start)):
+                self.send_json(400, {'error': 'Invalid song details or start/stop times.'})
+                return
+            item = sanitize_shared_track(track)
+            if item is None:
+                self.send_json(400, {'error': 'Invalid song in category.'})
+                return
+            clean.append(item)
+            ids.add(audio_url.rsplit('/', 1)[-1])
+        with db_lock, get_db() as conn:
+            row = conn.execute(
+                'SELECT c.updated FROM shared_categories c JOIN managed_local_categories m ON m.category_id = c.id '
+                'WHERE c.id = ?', (category_id,)
+            ).fetchone()
+            if not row:
+                self.send_json(404, {'error': 'That managed category no longer exists.'})
+                return
+            if row['updated'] != updated:
+                self.send_json(409, {'error': 'This category changed elsewhere. Reload before editing it.'})
+                return
+            if ids:
+                placeholders = ','.join('?' for _ in ids)
+                found = {row['id'] for row in conn.execute(
+                    f'SELECT id FROM shared_audio WHERE id IN ({placeholders})', tuple(ids)
+                )}
+                if found != ids:
+                    self.send_json(400, {'error': 'A selected song is no longer in the shared library.'})
+                    return
+            apply_shared_audio_renames(clean, shared_audio_renames(conn))
+            new_updated = time.time()
+            conn.execute('UPDATE shared_categories SET tracks = ?, updated = ? WHERE id = ?',
+                         (json.dumps(clean, ensure_ascii=False), new_updated, category_id))
+        self.send_json(200, {'ok': True, 'tracks': clean, 'updated': new_updated})
+
+    def api_get_shared_audio(self, path, head=False):
+        if not self.current_user():
+            self.send_error(401)
+            return
+        track_id = path.rsplit('/', 1)[-1]
+        if not re.fullmatch(r'[a-f0-9]{32}', track_id):
+            self.send_error(404)
+            return
+        with db_lock, get_db() as conn:
+            row = conn.execute('SELECT file_name FROM shared_audio WHERE id = ?', (track_id,)).fetchone()
+        if not row or not re.fullmatch(r'[a-f0-9]{32}\.[a-z0-9]{1,10}', row['file_name']):
+            self.send_error(404)
+            return
+        file_path = os.path.join(UPLOADS_DIR, row['file_name'])
+        try:
+            audio = open(file_path, 'rb')
+        except OSError:
+            self.send_error(404)
+            return
+        with audio:
+            size = os.fstat(audio.fileno()).st_size
+            start, end = 0, size - 1
+            requested_range = self.headers.get('Range')
+            if requested_range:
+                match = re.fullmatch(r'bytes=(\d*)-(\d*)', requested_range.strip())
+                if not match or not size or not (match.group(1) or match.group(2)):
+                    self.send_response(416)
+                    self.send_header('Content-Range', f'bytes */{size}')
+                    self.end_headers()
+                    return
+                if match.group(1):
+                    start = int(match.group(1))
+                    end = min(int(match.group(2)), end) if match.group(2) else end
+                else:
+                    suffix = int(match.group(2))
+                    start = max(0, size - suffix)
+                if start >= size or end < start:
+                    self.send_response(416)
+                    self.send_header('Content-Range', f'bytes */{size}')
+                    self.end_headers()
+                    return
+            self.send_response(206 if requested_range else 200)
+            self.send_header('Content-Type', AUDIO_CONTENT_TYPES.get(os.path.splitext(file_path)[1].lower(), 'application/octet-stream'))
+            self.send_header('Content-Length', str(max(0, end - start + 1)))
+            self.send_header('Accept-Ranges', 'bytes')
+            self.send_header('Cache-Control', 'private, no-store')
+            if requested_range:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{size}')
+            self.end_headers()
+            if not head:
+                audio.seek(start)
+                remaining = end - start + 1
+                while remaining:
+                    chunk = audio.read(min(remaining, 1024 * 1024))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+
     def api_integrations(self):
         with db_lock, get_db() as conn:
             config = read_config(conn)
@@ -1107,14 +1627,22 @@ class Handler(SimpleHTTPRequestHandler):
             if not key.startswith('hockey-soundboard-') or len(key) > 100 or not (value is None or isinstance(value, str)):
                 self.send_json(400, {'error': 'Invalid data'})
                 return
-        with db_lock, get_db() as conn:
-            for key, value in changes.items():
-                if value is None:
-                    conn.execute('DELETE FROM user_data WHERE user_id = ? AND key = ?', (user['id'], key))
-                else:
-                    conn.execute('INSERT INTO user_data (user_id, key, value) VALUES (?, ?, ?) '
-                                 'ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value',
-                                 (user['id'], key, value))
+        try:
+            with db_lock, get_db() as conn:
+                renames = shared_audio_renames(conn)
+                for key, value in changes.items():
+                    if value is None:
+                        conn.execute('DELETE FROM user_data WHERE user_id = ? AND key = ?', (user['id'], key))
+                    else:
+                        if key == DEFAULT_BOARD_PLAYLISTS_KEY and any(url.rsplit('/', 1)[-1] in value for url in renames):
+                            value = rename_playlist_data(value, renames)
+                        conn.execute('INSERT INTO user_data (user_id, key, value) VALUES (?, ?, ?) '
+                                     'ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value',
+                                     (user['id'], key, value))
+        except (ValueError, TypeError) as error:
+            self.log_error('Invalid playlists in account sync: %s', error)
+            self.send_json(400, {'error': 'Invalid saved playlists; no changes were saved.'})
+            return
         self.send_json(200, {'ok': True})
 
     def api_shared_list(self):
@@ -1125,8 +1653,9 @@ class Handler(SimpleHTTPRequestHandler):
         with db_lock, get_db() as conn:
             config = read_config(conn)
             rows = conn.execute(
-                'SELECT c.id, c.key, c.name, c.tracks, c.updated, c.owner_id, u.username FROM shared_categories c '
-                'JOIN users u ON u.id = c.owner_id ORDER BY c.name COLLATE NOCASE'
+                'SELECT c.id, c.key, c.name, c.tracks, c.updated, c.owner_id, u.username, '
+                'm.category_id AS managed FROM shared_categories c JOIN users u ON u.id = c.owner_id '
+                'LEFT JOIN managed_local_categories m ON m.category_id = c.id ORDER BY c.name COLLATE NOCASE'
             ).fetchall()
         categories = []
         for row in rows:
@@ -1137,7 +1666,7 @@ class Handler(SimpleHTTPRequestHandler):
             categories.append({
                 'id': row['id'], 'key': row['key'], 'name': row['name'],
                 'owner': row['username'], 'mine': row['owner_id'] == user['id'],
-                'trackCount': len(enabled_tracks), 'updated': row['updated']
+                'trackCount': len(enabled_tracks), 'updated': row['updated'], 'managed': row['managed'] is not None
             })
         self.send_json(200, {'categories': categories})
 
@@ -1207,6 +1736,13 @@ class Handler(SimpleHTTPRequestHandler):
         clean = [sanitize_shared_track(track) for track in tracks]
         clean = [track for track in clean if track]
         with db_lock, get_db() as conn:
+            if conn.execute(
+                'SELECT 1 FROM shared_categories c JOIN managed_local_categories m ON m.category_id = c.id '
+                'WHERE c.owner_id = ? AND c.key = ?', (user['id'], key.strip())
+            ).fetchone():
+                self.send_json(403, {'error': 'Edit managed categories in Local Song Management.'})
+                return
+            apply_shared_audio_renames(clean, shared_audio_renames(conn))
             conn.execute(
                 'INSERT INTO shared_categories (owner_id, key, name, tracks, updated) VALUES (?, ?, ?, ?, ?) '
                 'ON CONFLICT(owner_id, key) DO UPDATE SET name = excluded.name, tracks = excluded.tracks, '
@@ -1226,11 +1762,19 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_json(400, {'error': 'Invalid category'})
             return
         with db_lock, get_db() as conn:
+            if conn.execute(
+                'SELECT 1 FROM shared_categories c JOIN managed_local_categories m ON m.category_id = c.id '
+                'WHERE c.owner_id = ? AND c.key = ?', (user['id'], key)
+            ).fetchone():
+                self.send_json(403, {'error': 'Managed categories cannot be unshared here.'})
+                return
             conn.execute('DELETE FROM shared_categories WHERE owner_id = ? AND key = ?', (user['id'], key))
         self.send_json(200, {'ok': True})
 
     def end_headers(self):
-        if not self.path.startswith('/api/'):
+        if self.path.split('?', 1)[0] == '/msal-redirect.html':
+            self.send_header('Cache-Control', 'no-store')
+        elif not self.path.startswith('/api/'):
             self.send_header('Cache-Control', 'no-cache')
         super().end_headers()
 

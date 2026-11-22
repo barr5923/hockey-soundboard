@@ -22,7 +22,14 @@
   <p><a href="index.html">&larr; Back to the soundboard</a></p>
   <p id="helpIntro" class="note">Shared API credentials are managed by the administrator.</p>
   <p id="integrationNotice" role="alert" hidden></p>
-  <p id="integrationHelpEmpty">Local MP3 files and built-in sounds remain available.</p>
+  <p id="integrationHelpEmpty">Local audio files and built-in sounds remain available.</p>
+
+  <section id="onedrive">
+    <h2>OneDrive audio storage</h2>
+    <p>Profile data already syncs through the soundboard account. To store audio in OneDrive, an administrator must register a Microsoft Entra app that supports personal and work/school accounts, add <code>https://hockey-soundboard.fly.dev/msal-redirect.html</code> as a Single-page application redirect URI, grant delegated Microsoft Graph permission <code>Files.ReadWrite.AppFolder</code>, and set the app's client ID as <code>SOUNDBOARD_ONEDRIVE_CLIENT_ID</code> on Fly.io.</p>
+    <p>After setup, connect OneDrive in soundboard Settings. When adding an audio file, select <strong>Store selected audio in OneDrive</strong>. Files are kept in the app's private OneDrive folder; the same Microsoft account must be connected on each device. OneDrive-stored songs need internet access and are not included when sharing categories.</p>
+    <p><a href="https://learn.microsoft.com/en-us/onedrive/developer/rest-api/concepts/special-folders-appfolder?view=odsp-graph-online" target="_blank" rel="noopener">About OneDrive app folders</a> · <a href="https://learn.microsoft.com/en-us/entra/identity-platform/msal-js-initializing-client-applications" target="_blank" rel="noopener">Microsoft sign-in for browser apps</a></p>
+  </section>
 
   <section id="spotify" data-integration="spotify">
     <h2>Spotify: get a Client ID</h2>

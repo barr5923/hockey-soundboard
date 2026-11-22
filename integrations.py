@@ -1,6 +1,7 @@
 """App-wide music integration configuration, separate from user settings."""
 
 import json
+import os
 import re
 
 PROVIDERS = ('spotify', 'youtube', 'appleMusic')
@@ -24,7 +25,8 @@ def public_config(config):
         'enabled': config['enabled'],
         'spotifyClientId': config['spotifyClientId'],
         'youtubeConfigured': bool(config['youtubeApiKey']),
-        'googleClientId': config.get('googleClientId', '')
+        'googleClientId': config.get('googleClientId', ''),
+        'oneDriveClientId': os.environ.get('SOUNDBOARD_ONEDRIVE_CLIENT_ID', '').strip()
     }
 
 
@@ -54,7 +56,7 @@ def validate_update(body, previous):
 
 
 def track_enabled(track, config):
-    if track.get('audioDataUrl') or track.get('audioStorageId') or track.get('audioUrl'):
+    if track.get('audioDataUrl') or track.get('audioStorageId') or track.get('oneDriveItemId') or track.get('audioUrl'):
         return True
     if track.get('youtubeUrl') or track.get('youtubeEmbedUrl'):
         return config['enabled']['youtube']

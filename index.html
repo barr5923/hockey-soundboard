@@ -6,7 +6,7 @@
     <title>Hockey Game Soundboard</title>
     <meta name="theme-color" content="#0e2d47" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="stylesheet" href="styles.css?v=71" />
+    <link rel="stylesheet" href="styles.css?v=83" />
   </head>
   <body>
     <div class="page-shell">
@@ -20,13 +20,16 @@
         </div>
 
         <div class="top-controls">
-          <button id="stopPlayback" class="top-button stop-button" type="button" aria-label="Stop music playback">Stop</button>
+          <button id="stopPlayback" class="top-button stop-button" type="button" aria-label="Stop all playback">Stop</button>
           <button id="pauseToggle" class="top-button accent" type="button">Pause</button>
           <button id="goalHorn" class="top-button danger" type="button">Horn</button>
           <span class="score-wrap">
             <button id="scoreButton" class="top-button score-button" type="button">Score</button>
             <button id="scoreTeamsButton" class="score-teams-button" type="button" aria-label="Score announcement teams" title="Score announcement teams">⚙</button>
           </span>
+          <div class="game-mode-controls">
+            <button id="gameModeToggle" class="top-button neutral" type="button" aria-pressed="false">Game mode</button>
+          </div>
         </div>
       </header>
 
@@ -120,6 +123,17 @@
             </div>
           </div>
 
+          <div id="oneDriveSection" class="spotify-section">
+            <h3>OneDrive audio storage</h3>
+            <p class="spotify-connection-status">Connect your Microsoft account to store audio in this app's private OneDrive folder. Your profile continues to sync through the soundboard account.</p>
+            <p id="oneDriveSetupNotice" class="spotify-connection-status" hidden>The administrator must configure a Microsoft Entra app registration before OneDrive can be connected.</p>
+            <p id="oneDriveConnectionStatus" class="spotify-connection-status" role="status" aria-live="polite"></p>
+            <div class="settings-actions compact-actions">
+              <button id="oneDriveDisconnectButton" class="source-button secondary" type="button">Disconnect OneDrive</button>
+              <button id="oneDriveConnectButton" class="source-button" type="button">Connect OneDrive</button>
+            </div>
+          </div>
+
           <div class="spotify-section" data-integration="youtube">
             <h3>YouTube playlist import <a class="help-link" href="how-to.html#youtube" target="_blank" rel="noopener" title="How to get a YouTube API key" aria-label="How to get a YouTube API key">?</a></h3>
             <p class="spotify-connection-status">The shared API key is managed by the administrator. Public and unlisted playlist imports use the server.</p>
@@ -132,7 +146,7 @@
         </div>
       </div>
 
-      <div id="status" class="status-bar">
+      <div id="status" class="status-bar" role="status" aria-live="polite">
         Ready for the next shift.
       </div>
       <p id="integrationNotice" class="offline-mode-note" role="alert" hidden></p>
@@ -147,13 +161,64 @@
         </div>
       </section>
 
-      <section class="library-panel">
+      <section id="musicLibraryDialog" class="song-editor music-library-dialog hidden" role="dialog" aria-modal="true" aria-labelledby="musicLibraryHeading">
+        <div class="song-editor-card library-panel">
         <div class="library-panel-header">
-          <h3>Music library</h3>
-          <button id="musicLibraryToggle" class="library-toggle" type="button" aria-label="Expand Music library" aria-controls="musicLibraryContent" aria-expanded="false" title="Expand Music library">+</button>
+          <h2 id="musicLibraryHeading">Music library</h2>
+          <button id="musicLibraryClose" class="source-button ghost" type="button">Close</button>
         </div>
-
-        <div id="musicLibraryContent" class="hidden">
+        <p id="musicLibraryFeedback" class="music-library-feedback" role="status" aria-live="polite"></p>
+        <div id="musicLibraryContent">
+        <div class="library-group">
+          <h4>Shared playlists</h4>
+          <div class="source-row">
+            <label class="source-field wide">
+              <span>Playlist</span>
+              <select id="sharedPlaylistSelect"><option value="">Choose a playlist</option></select>
+            </label>
+            <button id="addSharedPlaylist" class="source-button" type="button" disabled>Add playlist to my board</button>
+          </div>
+          <div class="source-row">
+            <label class="source-field wide">
+              <span>Song in playlist</span>
+              <select id="sharedPlaylistSong"><option value="">Choose a song</option></select>
+            </label>
+            <label class="source-field">
+              <span>Category</span>
+              <select id="sharedPlaylistCategory"><option value="">Uncategorized</option></select>
+            </label>
+            <button id="addSharedPlaylistSong" class="source-button" type="button" disabled>Add song to category</button>
+          </div>
+          <p id="sharedPlaylistStatus" class="spreadsheet-note" role="status">Choose a playlist to see its songs.</p>
+        </div>
+        <div class="library-group">
+          <h4>Offline playlists</h4>
+          <div class="source-row">
+            <label class="source-field wide">
+              <span>Category on my board</span>
+              <select id="offlinePlaylistSelect"><option value="">Choose a category</option></select>
+            </label>
+            <button id="checkOfflinePlaylist" class="source-button secondary" type="button" disabled>Check size / retry</button>
+            <button id="downloadOfflinePlaylist" class="source-button" type="button" disabled>Download for offline</button>
+            <button id="removeOfflineDownloads" class="source-button secondary" type="button" disabled>Remove all downloads</button>
+          </div>
+          <p id="offlinePlaylistStatus" class="spreadsheet-note" role="status">Choose a category to check its offline availability and download size.</p>
+        </div>
+        <div class="library-group">
+          <h4>Shared music stored in the app</h4>
+          <div class="source-row">
+            <label class="source-field wide">
+              <span>Song</span>
+              <select id="sharedAudioSelect"><option value="">Choose a song</option></select>
+            </label>
+            <label class="source-field">
+              <span>Category</span>
+              <select id="sharedAudioCategory"><option value="">Uncategorized</option></select>
+            </label>
+            <button id="addSharedAudio" class="source-button" type="button">Add song to category</button>
+          </div>
+          <p id="sharedAudioStatus" class="spreadsheet-note" role="status">Open Music library to load shared songs.</p>
+        </div>
         <div class="library-group">
           <h4>Add music</h4>
 
@@ -184,7 +249,7 @@
 
         <label class="music-source-switch" id="localMp3ModeSwitch" data-integrations-any>
           <input id="useLocalMp3" type="checkbox" />
-          <span>Use local MP3</span>
+          <span>Use local audio</span>
         </label>
 
         <div id="onlineMusicSource" class="online-music-source" data-integrations-any>
@@ -213,10 +278,15 @@
             </select>
           </label>
           <label class="source-field">
-            <span>Local MP3</span>
-            <input id="localAudio" type="file" accept=".mp3,audio/mpeg" />
+            <span>Local audio</span>
+            <input id="localAudio" type="file" accept="audio/*,.mp3,.m4a,.m4b,.aac,.wav,.wave,.ogg,.oga,.opus,.webm,.flac,.aif,.aiff,.aifc,.amr,.3gp" />
           </label>
-          <button id="addLocalMp3" class="source-button" type="button" disabled>Add MP3 to category</button>
+          <p class="spreadsheet-note">By default, selected audio is stored in the shared app library and is available on other devices. Only administrators can upload to the shared library; other users can select shared songs or use their own OneDrive.</p>
+          <label class="music-source-switch">
+            <span>Store selected audio in OneDrive</span>
+            <input id="storeAudioInOneDrive" type="checkbox" />
+          </label>
+          <button id="addLocalMp3" class="source-button" type="button" disabled>Add audio to category</button>
         </div>
 
         </div>
@@ -233,8 +303,8 @@
         </div>
         <div class="editor-grid spreadsheet-tools">
           <label class="editor-field wide">
-            <span>MP3 files referenced in Source (optional)</span>
-            <input id="spreadsheetMp3FilesInput" type="file" accept=".mp3,audio/mpeg" multiple />
+            <span>Audio files referenced in Source (optional)</span>
+            <input id="spreadsheetMp3FilesInput" type="file" accept="audio/*,.mp3,.m4a,.m4b,.aac,.wav,.wave,.ogg,.oga,.opus,.webm,.flac,.aif,.aiff,.aifc,.amr,.3gp" multiple />
           </label>
           <label class="editor-field wide">
             <span>Import Excel or CSV spreadsheet</span>
@@ -242,7 +312,7 @@
           </label>
           <button id="downloadSpreadsheetExample" class="source-button secondary" type="button">Download example Excel</button>
         </div>
-        <p class="spreadsheet-note">One song per row. Select referenced MP3 files here so Source filenames can be matched during import.</p>
+        <p class="spreadsheet-note">One song per row. Administrators can select referenced audio files here so Source filenames can be matched and uploaded during import. Playback depends on browser support for each file's format.</p>
         <h4>Share or export a category</h4>
         <div class="editor-grid spreadsheet-tools">
           <label class="editor-field wide">
@@ -257,6 +327,7 @@
         <p id="shareCategoryNote" class="spreadsheet-note">Categories are private until you share them. Downloads can be imported with the spreadsheet import above.</p>
         <h4>Shared by other users</h4>
         <div id="sharedCategoryList" class="shared-category-list"></div>
+        </div>
         </div>
         </div>
       </section>
@@ -427,11 +498,6 @@
       </section>
     </div>
 
-    <div class="fullscreen-controls">
-      <button id="enterFullscreen" class="top-button neutral" type="button">Full screen</button>
-      <button id="exitFullscreen" class="top-button neutral" type="button" hidden>Exit full screen</button>
-    </div>
-
     <div id="authOverlay" class="auth-overlay hidden">
       <form id="authForm" class="auth-card" autocomplete="on">
         <h2 id="authTitle">Log in</h2>
@@ -522,8 +588,54 @@
     <div class="side-menu">
       <button class="side-menu-toggle" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="sideMenuList">☰</button>
       <div id="sideMenuList" class="side-menu-list hidden">
+        <button id="musicLibraryToggle" class="side-menu-item" type="button" aria-controls="musicLibraryDialog" aria-expanded="false">Music library</button>
+        <button id="localSongManagementOpen" class="side-menu-item" type="button" aria-controls="localSongManagement">Local Song Management</button>
         <button id="settingsToggle" class="side-menu-item" type="button" aria-controls="settingsPanel" aria-expanded="false">Settings</button>
         <button id="adminPanelLink" class="side-menu-item hidden" type="button" aria-controls="adminOverlay">Admin panel</button>
+      </div>
+    </div>
+    <div id="localSongManagement" class="song-editor local-song-management hidden" role="dialog" aria-modal="true" aria-labelledby="localSongManagementHeading">
+      <div class="song-editor-card local-song-management-card">
+        <div class="settings-dialog-header">
+          <h2 id="localSongManagementHeading">Local Song Management</h2>
+          <button id="localSongManagementClose" class="source-button ghost" type="button">Close</button>
+        </div>
+        <p class="spreadsheet-note">Renaming a library song updates its name in all playlists. Other template edits do not alter existing personal boards.</p>
+        <p id="localSongManagementStatus" class="local-song-status" role="status" aria-live="polite"></p>
+        <div class="local-song-columns">
+          <section class="local-song-library" aria-labelledby="localSongLibraryHeading">
+            <h3 id="localSongLibraryHeading">All songs</h3>
+            <div class="local-song-filters">
+              <label>Search <input id="localSongSearch" type="search" placeholder="Search songs" /></label>
+              <label>Show
+                <select id="localSongFilter">
+                  <option value="all">All songs</option>
+                  <option value="unsorted">To Sort</option>
+                </select>
+              </label>
+            </div>
+            <div id="localSongUpload" class="local-song-upload hidden">
+              <label for="localSongFiles">Drop audio files here or choose files to upload</label>
+              <input id="localSongFiles" type="file" accept="audio/*,.mp3,.m4a,.m4b,.aac,.wav,.wave,.ogg,.oga,.opus,.webm,.flac,.aif,.aiff,.aifc,.amr,.3gp" multiple />
+            </div>
+            <p id="localSongCount" class="spreadsheet-note"></p>
+            <div class="local-song-table-wrap">
+              <table class="local-song-table">
+                <thead><tr><th>Name</th><th>Description</th><th>Category</th><th>Start</th><th>Stop</th><th>Actions</th></tr></thead>
+                <tbody id="localSongLibraryRows"></tbody>
+              </table>
+            </div>
+          </section>
+          <section class="local-song-categories" aria-labelledby="localSongCategoriesHeading">
+            <h3 id="localSongCategoriesHeading">Category templates</h3>
+            <div id="localSongCreateCategory" class="local-song-create hidden">
+              <label for="localSongCategoryName">New category</label>
+              <input id="localSongCategoryName" type="text" maxlength="100" />
+              <button id="localSongCategoryCreate" class="source-button" type="button">Add category</button>
+            </div>
+            <div id="localSongCategoryList"></div>
+          </section>
+        </div>
       </div>
     </div>
     <div id="gameRulesDialog" class="song-editor game-rules-editor hidden" role="dialog" aria-modal="true" aria-labelledby="gameRulesHeading">
@@ -656,12 +768,16 @@
         </section>
       </div>
     </div>
-    <script src="integration-controls.js?v=3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@5.25.0/lib/msal-browser.min.js"></script>
+    <script src="integration-controls.js?v=4"></script>
+    <script src="onedrive.js?v=2"></script>
     <script src="apple-music.js?v=4"></script>
-    <script src="auth.js?v=30"></script>
+    <script src="song-picker.js?v=2"></script>
+    <script src="auth.js?v=42"></script>
     <script src="roster.js?v=11"></script>
     <script src="score-sheet.js?v=1"></script>
     <script src="game-rules.js?v=1"></script>
     <script src="playlist-converter.js?v=1"></script>
+    <script src="local-song-management.js?v=3"></script>
   </body>
 </html>
