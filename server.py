@@ -128,8 +128,6 @@ REGISTRATION_CODE_CONFIG_KEY = 'registration_code'
 DEFAULT_BOARD_PLAYLISTS_KEY = 'hockey-soundboard-playlists-v1'
 DEFAULT_BOARD_KEYS = (
     DEFAULT_BOARD_PLAYLISTS_KEY,
-    'hockey-soundboard-category-grid-v2',
-    'hockey-soundboard-category-grid-mobile-v1',
     'hockey-soundboard-category-settings-v1',
     'hockey-soundboard-hidden-categories-v1',
 )

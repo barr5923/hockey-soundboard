@@ -123,9 +123,10 @@ horizontally to reach all controls.
 ### Default categories
 
 In **Default categories**, choose **Save my categories as the default** to
-snapshot your categories, songs, layout, category settings, and hidden
+snapshot your categories, songs, category settings, and hidden
 categories. Played flags are reset; settings, tokens, roster, and score sheet
-are not included. Every new account (registered or admin-created) starts with
+are not included. Category positions and sizes are stored only on each device,
+so desktops and touch devices keep separate layouts. Every new account (registered or admin-created) starts with
 this snapshot. The snapshot doesn't change on its own, so save again after
 editing your board. To replace an existing user's categories with the snapshot,
 choose **Apply defaults** in their **Existing users** row. This overwrites their
@@ -133,12 +134,14 @@ categories, and anyone already signed in must reload to see the change.
 
 ## Phone layout
 
-On screens 720px wide or narrower, categories initially stack in desktop order.
+On screens 720px wide or narrower, and on touch-first devices in either
+orientation, categories use a separate local device layout.
 Drag a category by its top-center grab bar to rearrange it; on phones, other
 categories reflow around it. The grab bar also supports arrow keys. Drag the
 bottom-right handle to resize a category; categories can be as narrow
 as one-quarter of a standard column and reflow to fill the phone grid. A phone's
-saved sizes are separate from the desktop layout. Desktop categories can also
+saved sizes and positions stay separate from the desktop layout and are not
+overwritten by signing in on another device. Desktop categories can also
 be resized in quarter-column steps. Resize handles support arrow keys as well.
 Each phone song list shows two songs and scrolls for
 the rest.
@@ -148,7 +151,7 @@ the rest.
 Choose **Game mode** to focus on playback. The playback controls stay at the
 bottom of the screen with a larger centered Stop button, and category play
 buttons are enlarged. Phones show compact
-category cards with Play, Auto On/Off, and Reset; larger screens also show song
+category cards with Play, Auto On/Off, Reset, and Shuffle; larger screens also show song
 lists when there is room.
 The layout adapts to the screen and scrolls if there are too many categories to
 fit comfortably. Choose **Exit game** to return to the normal editor and saved

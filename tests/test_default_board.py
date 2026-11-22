@@ -79,7 +79,7 @@ class DefaultBoardTests(unittest.TestCase):
         self.assertEqual((payload['categoryCount'], payload['songCount'], payload['savedBy']), (2, 3, 'ben'))
         with self.get_db() as conn:
             board = server.read_default_board(conn)
-        self.assertEqual(set(board['data']), {PLAYLISTS, GRID})
+        self.assertEqual(set(board['data']), {PLAYLISTS})
         playlists = json.loads(board['data'][PLAYLISTS])
         self.assertFalse(any(track.get('played') for tracks in playlists.values() for track in tracks))
         self.assertIn('"played": true', self.data(1)[PLAYLISTS])
@@ -93,7 +93,7 @@ class DefaultBoardTests(unittest.TestCase):
         self.assertEqual(status, 200)
         craig = self.data(2)
         self.assertIn('our-goal-songs', json.loads(craig[PLAYLISTS]))
-        self.assertEqual(craig[GRID], '{"our-goal-songs":{"w":1,"h":7}}')
+        self.assertNotIn(GRID, craig)
         self.assertEqual(craig['hockey-soundboard-settings-v1'], '{"soundboardName":"Craig"}')
         self.assertEqual(self.call('api_admin_apply_default_board', ben, {'userId': 99})[0], 404)
 
@@ -116,7 +116,7 @@ class DefaultBoardTests(unittest.TestCase):
         with self.get_db() as conn:
             conn.execute("INSERT INTO users VALUES (3, 'newbie', 0)")
             self.assertTrue(server.apply_default_board(conn, 3))
-        self.assertEqual(set(self.data(3)), {PLAYLISTS, GRID})
+        self.assertEqual(set(self.data(3)), {PLAYLISTS})
 
 
 if __name__ == '__main__':

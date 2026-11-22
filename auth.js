@@ -1,7 +1,11 @@
 (() => {
-  const APP_SCRIPT = 'app.js?v=119';
+  const APP_SCRIPT = 'app.js?v=120';
   const PREFIX = 'hockey-soundboard-';
-  const LOCAL_ONLY_KEYS = new Set(['hockey-soundboard-offline-mode-v1']);
+  const LOCAL_ONLY_KEYS = new Set([
+    'hockey-soundboard-offline-mode-v1',
+    'hockey-soundboard-category-grid-v2',
+    'hockey-soundboard-category-grid-mobile-v1'
+  ]);
   const LAST_USER_KEY = 'hs-auth-last-user';
   const AUDIO_DB_BASE = 'hockey-soundboard-audio-v1';
 
@@ -679,7 +683,9 @@
         syncedLocalKeys().forEach((key) => { pending[key] = localStorage.getItem(key); });
       } else {
         clearLocalData();
-        Object.entries(data).forEach(([key, value]) => nativeSet.call(localStorage, key, value));
+        Object.entries(data)
+          .filter(([key]) => isSynced(key))
+          .forEach(([key, value]) => nativeSet.call(localStorage, key, value));
       }
     }
     nativeSet.call(localStorage, LAST_USER_KEY, JSON.stringify({ id: user.id, username: user.username }));

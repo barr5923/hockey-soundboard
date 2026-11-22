@@ -4356,10 +4356,11 @@ function computeCategoryPlacement(keys, columns, mobile = false) {
 }
 
 const MOBILE_BOARD_QUERY = window.matchMedia('(max-width: 720px)');
+const TOUCH_DEVICE_QUERY = window.matchMedia('(pointer: coarse) and (hover: none)');
 const MOBILE_VISIBLE_SONGS = 2;
 
 function isMobileBoardLayout() {
-  return MOBILE_BOARD_QUERY.matches;
+  return MOBILE_BOARD_QUERY.matches || TOUCH_DEVICE_QUERY.matches;
 }
 
 function categoriesInDesktopOrder(keys) {
@@ -4435,11 +4436,11 @@ function updateCategoryGridLayout() {
     boardElement.style.gridTemplateColumns = `repeat(${columns}, minmax(0, 1fr))`;
     boardElement.style.gridTemplateRows = `repeat(${rows}, minmax(80px, 1fr))`;
     boardElement.classList.toggle('game-compact', isMobileBoardLayout() || (availableHeight - CATEGORY_GRID_GAP * (rows - 1)) / rows < 180);
-    cards.map((card, index) => {
-      const saved = state.categorySizes[card.dataset.categoryKey] || {};
-      return { card, index, row: Number.isInteger(saved.row) ? saved.row : Number.MAX_SAFE_INTEGER,
-        col: Number.isFinite(saved.col) ? saved.col : Number.MAX_SAFE_INTEGER };
-    }).sort((a, b) => a.row - b.row || a.col - b.col || a.index - b.index)
+    const keys = Object.keys(state.playlists).filter((key) => key !== 'built-in-sounds');
+    const order = isMobileBoardLayout() ? mobileCategoryOrder() : categoriesInDesktopOrder(keys);
+    cards.map((card, index) => ({ card, index, order: order.indexOf(card.dataset.categoryKey) }))
+      .sort((a, b) => (a.order < 0 ? Number.MAX_SAFE_INTEGER : a.order)
+        - (b.order < 0 ? Number.MAX_SAFE_INTEGER : b.order) || a.index - b.index)
       .forEach(({ card }, order) => {
         card.classList.remove('category-narrow');
         card.style.gridColumn = '';
