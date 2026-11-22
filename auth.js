@@ -513,7 +513,7 @@
     });
   }
 
-  function showLogin({ inviteRequired, registrationConfigured = inviteRequired, resetToken }) {
+  function showLogin({ resetToken }) {
     return new Promise((resolve) => {
       const overlay = document.getElementById('authOverlay');
       const form = document.getElementById('authForm');
@@ -543,7 +543,7 @@
         submit.textContent = registering ? 'Create account' : mode === 'forgot' ? 'Send reset link' :
           mode === 'reset' ? 'Reset password' : 'Log in';
         toggle.textContent = registering ? 'Have an account? Log in' : 'New here? Create an account';
-        toggle.classList.toggle('hidden', !(registering || (loggingIn && registrationConfigured)));
+        toggle.classList.toggle('hidden', !(registering || loggingIn));
         forgot.classList.toggle('hidden', !loggingIn);
         back.classList.toggle('hidden', !(mode === 'forgot' || mode === 'reset'));
         setField(usernameField, registering || loggingIn, registering || loggingIn);
@@ -551,9 +551,9 @@
         setField(passwordField, registering || loggingIn || mode === 'reset', registering || loggingIn || mode === 'reset');
         setField(passwordConfirmationField, registering, registering);
         form.password.minLength = registering || mode === 'reset' ? 8 : 0;
-        inviteField.classList.toggle('hidden', !(registering && inviteRequired));
-        form.invite.required = registering && inviteRequired;
-        form.invite.autocomplete = inviteRequired ? 'off' : '';
+        inviteField.classList.toggle('hidden', !registering);
+        form.invite.required = registering;
+        form.invite.autocomplete = 'off';
         form.password.autocomplete = registering || mode === 'reset' ? 'new-password' : 'current-password';
         form.passwordConfirmation.autocomplete = 'new-password';
         error.textContent = '';
@@ -653,17 +653,14 @@
     let first = false;
     const resetToken = new URLSearchParams(location.search).get('reset');
     if (resetToken) {
-      const result = await showLogin({ inviteRequired: false, registrationConfigured: false, resetToken });
+      const result = await showLogin({ resetToken });
       user = result.user;
       first = Boolean(result.user.first);
     } else if (me.ok) {
       user = await me.json();
       if (verificationSucceeded) user.emailVerified = true;
     } else {
-      const info = await me.json().catch(() => ({}));
       const result = await showLogin({
-        inviteRequired: Boolean(info.inviteRequired),
-        registrationConfigured: Boolean(info.registrationConfigured ?? info.inviteRequired),
         resetToken: null
       });
       user = result.user;
